@@ -31,9 +31,11 @@ export default function AIFactory() {
     posted: 0,
     failed: 0,
     videoFailed: 0,
+    videoFailedPosted: 0,
     manual: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [isRetryingBatch, setIsRetryingBatch] = useState(false);
 
   /** Filter States */
   const [filterStatus, setFilterStatus] = useState('');
@@ -210,6 +212,42 @@ export default function AIFactory() {
     }
   };
 
+  /** Đưa hàng loạt bài lỗi video về hàng chờ */
+  const ztteam_retryFailedVideosBatch = async (scope: 'unposted' | 'posted' | 'all') => {
+    const scopeLabel = scope === 'unposted'
+      ? 'Chưa đăng'
+      : scope === 'posted'
+        ? 'Đã đăng'
+        : 'Tất cả';
+    const targetCount = scope === 'unposted'
+      ? (counts.videoFailed || 0)
+      : scope === 'posted'
+        ? (counts.videoFailedPosted || 0)
+        : ((counts.videoFailed || 0) + (counts.videoFailedPosted || 0));
+
+    if (targetCount === 0) {
+      ztteam_showToast(`Không có bài viết lỗi video nào trong mục "${scopeLabel}"`, 'info');
+      return;
+    }
+
+    const confirmed = await ztteam_showConfirm(
+      'Khôi phục video lỗi về hàng chờ',
+      `Bạn có chắc chắn muốn đưa ${targetCount} bài viết lỗi video (${scopeLabel}) về hàng chờ tạo video? Hệ thống sẽ tự động render tuần tự ngầm.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setIsRetryingBatch(true);
+      const res = await api.post('image/retry-failed-videos', { scope });
+      ztteam_showToast(res.data?.message || 'Đã đưa các bài viết về hàng chờ video thành công', 'success');
+      ztteam_loadItems();
+    } catch (err: any) {
+      ztteam_showToast(err.response?.data?.message || 'Lỗi đưa về hàng chờ', 'error');
+    } finally {
+      setIsRetryingBatch(false);
+    }
+  };
+
   /** Đặt lại toàn bộ bộ lọc */
   const ztteam_resetFilters = () => {
     setFilterStatus('');
@@ -233,7 +271,8 @@ export default function AIFactory() {
     { key: 'COMPLETED', label: 'Sẵn sàng đăng', icon: 'schedule', count: counts.completed },
     { key: 'POSTED', label: 'Đã xuất bản', icon: 'check_circle', count: counts.posted },
     { key: 'FAILED', label: 'Lỗi Đăng Fanpage', icon: 'sync_problem', count: counts.failed },
-    { key: 'VIDEO_FAILED', label: 'Lỗi Video Reel', icon: 'videocam_off', count: counts.videoFailed || 0 },
+    { key: 'VIDEO_FAILED', label: 'Lỗi Video (Chưa đăng)', icon: 'videocam_off', count: counts.videoFailed || 0 },
+    { key: 'VIDEO_FAILED_POSTED', label: 'Lỗi Video (Đã đăng)', icon: 'published_with_changes', count: counts.videoFailedPosted || 0 },
   ];
 
   return (
@@ -456,6 +495,48 @@ export default function AIFactory() {
           </button>
         </div>
       </div>
+
+      {/** Banner Thao Tác Hàng Loạt Cho Mục Lỗi Video */}
+      {(filterStatus === 'VIDEO_FAILED' || filterStatus === 'VIDEO_FAILED_POSTED' || filterVideoStatus === 'FAILED') && (
+        <div className="bg-gradient-to-r from-amber-500/15 via-blue-500/10 to-transparent p-4 rounded-2xl border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-2xl">replay_circle_filled</span>
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-fb-text flex items-center gap-2">
+                <span>Khôi Phục Video Lỗi Về Hàng Chờ</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300">
+                  {filterStatus === 'VIDEO_FAILED'
+                    ? `${counts.videoFailed || 0} bài chưa đăng`
+                    : filterStatus === 'VIDEO_FAILED_POSTED'
+                      ? `${counts.videoFailedPosted || 0} bài đã đăng`
+                      : `${(counts.videoFailed || 0) + (counts.videoFailedPosted || 0)} bài`}
+                </span>
+              </h4>
+              <p className="text-xs text-fb-text-muted mt-0.5">
+                Đưa toàn bộ bài viết video lỗi trong mục này về hàng chờ (PENDING) để hệ thống tự động render lại.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              disabled={isRetryingBatch || (filterStatus === 'VIDEO_FAILED' ? !counts.videoFailed : filterStatus === 'VIDEO_FAILED_POSTED' ? !counts.videoFailedPosted : !(counts.videoFailed || counts.videoFailedPosted))}
+              onClick={() => ztteam_retryFailedVideosBatch(filterStatus === 'VIDEO_FAILED' ? 'unposted' : filterStatus === 'VIDEO_FAILED_POSTED' ? 'posted' : 'all')}
+              className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <span className={`material-symbols-outlined text-[18px] ${isRetryingBatch ? 'animate-spin' : ''}`}>
+                {isRetryingBatch ? 'progress_activity' : 'playlist_add'}
+              </span>
+              <span>
+                {isRetryingBatch ? 'Đang xử lý...' : 'Đưa tất cả về hàng chờ video'}
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/** Lưới Bài Viết */}
       <div className="bg-fb-surface rounded-2xl p-6 shadow-lg min-h-[420px] flex flex-col justify-between">

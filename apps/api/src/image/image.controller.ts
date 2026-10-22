@@ -161,6 +161,10 @@ export class ZTTeamImageController {
       const s = status.toUpperCase();
       if (s === 'VIDEO_FAILED') {
         where.video_status = 'FAILED';
+        where.is_posted = false;
+      } else if (s === 'VIDEO_FAILED_POSTED') {
+        where.video_status = 'FAILED';
+        where.is_posted = true;
       } else if (s === 'POSTED') {
         const postedCondition = [{ is_posted: true }, { status: 'POSTED' }];
         if (where.OR) {
@@ -208,6 +212,7 @@ export class ZTTeamImageController {
       countPosted,
       countFailed,
       countVideoFailed,
+      countVideoFailedPosted,
       countManual,
     ] = await Promise.all([
       this.prisma.ztteam_images.findMany({
@@ -235,7 +240,10 @@ export class ZTTeamImageController {
         where: { ...baseWhere, status: 'FAILED' },
       }),
       this.prisma.ztteam_images.count({
-        where: { ...baseWhere, video_status: 'FAILED' },
+        where: { ...baseWhere, video_status: 'FAILED', is_posted: false },
+      }),
+      this.prisma.ztteam_images.count({
+        where: { ...baseWhere, video_status: 'FAILED', is_posted: true },
       }),
       this.prisma.ztteam_images.count({
         where: { page_id: null },
@@ -373,8 +381,47 @@ export class ZTTeamImageController {
         posted: countPosted,
         failed: countFailed,
         videoFailed: countVideoFailed,
+        videoFailedPosted: countVideoFailedPosted,
         manual: countManual,
       },
+    };
+  }
+
+  /**
+   * ZTTeam: Đưa hàng loạt bài viết lỗi video Reel về hàng chờ tạo video
+   * POST /api/image/retry-failed-videos
+   */
+  @Post('retry-failed-videos')
+  @UseGuards(ZTTeamAuthGuard)
+  async ztteam_retryFailedVideos(@Body() body: { scope?: string; pageId?: string }) {
+    const scope = body?.scope || 'unposted'; // 'unposted' | 'posted' | 'all'
+    const where: any = { video_status: 'FAILED' };
+
+    if (scope === 'unposted') {
+      where.is_posted = false;
+    } else if (scope === 'posted') {
+      where.is_posted = true;
+    }
+
+    if (body?.pageId) {
+      where.page_id = body.pageId;
+    }
+
+    const updateRes = await this.prisma.ztteam_images.updateMany({
+      where,
+      data: {
+        video_status: 'PENDING',
+        error_log: null,
+        updated_at: new Date(),
+      },
+    });
+
+    this.logger.log(`[Batch Retry Videos] Reset ${updateRes.count} failed video posts to PENDING (scope: ${scope})`);
+
+    return {
+      success: true,
+      message: `Đã đưa ${updateRes.count} bài viết lỗi về hàng chờ tạo video thành công`,
+      count: updateRes.count,
     };
   }
 
@@ -872,16 +919,11 @@ export class ZTTeamImageController {
       throw new Error(`Không tìm thấy bài viết ${id}`);
     }
 
-    /** Chặn tuyệt đối: Nếu bài viết đã đăng lên Facebook thì không cho tạo video nữa */
-    if (post.is_posted || post.status === 'POSTED') {
-      throw new BadRequestException('Bài viết này đã được đăng lên Facebook, không thể đưa vào hàng đợi tạo video nữa.');
-    }
-
     const engine = (post.page as any)?.video_engine || 'hook_image';
 
     if (engine === 'hook_image' || engine === 'text_story') {
-      /** Kích hoạt render Video Hook sắc nét / Text Story 10s tự động ngay tại server */
-      this.hookVideoService.ztteam_renderHookVideo(id).catch(err => {
+      /** Kích hoạt render Video Hook sắc nét / Text Story 10s tự động ngay tại server (cho phép force đối với bài đã xuất bản ảnh) */
+      this.hookVideoService.ztteam_renderHookVideo(id, { forceRegenHook: true }).catch(err => {
         this.logger.error(`[Manual Hook/Text Story Video Error] ${err.message}`);
       });
 

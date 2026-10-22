@@ -77,8 +77,6 @@ export class ZTTeamRenderCron implements OnApplicationBootstrap {
       /** ZTTeam: Chỉ tự động render Hook Video cho các Page cấu hình hook_image hoặc text_story. TUYỆT ĐỐI không chạm vào bài của Page Muse! */
       const pendingImages = await this.prisma.ztteam_images.findMany({
         where: {
-          is_posted: false,
-          status: { not: 'POSTED' },
           video_status: 'PENDING',
           OR: [
             { page_id: null },
@@ -96,11 +94,11 @@ export class ZTTeamRenderCron implements OnApplicationBootstrap {
 
       if (pendingImages.length === 0) return;
 
-      this.logger.log(`[Auto Hook Video Worker] Tìm thấy ${pendingImages.length} bài viết PENDING (chưa đăng), bắt đầu tự động render...`);
+      this.logger.log(`[Auto Hook Video Worker] Tìm thấy ${pendingImages.length} bài viết PENDING, bắt đầu tự động render...`);
 
       for (const img of pendingImages) {
         try {
-          const res = await this.hookVideoService.ztteam_renderHookVideo(img.id);
+          const res = await this.hookVideoService.ztteam_renderHookVideo(img.id, { forceRegenHook: true });
           if (res.success) {
             this.logger.log(`[Auto Hook Video Worker] Render thành công video cho bài ${img.id} (Page: ${img.page?.name || 'Manual Studio'}): ${res.videoUrl}`);
           } else {

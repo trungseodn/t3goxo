@@ -654,19 +654,19 @@ export default function ZTTeamAIPostCard({
             </button>
           )}
 
-          {!isAlreadyPosted && isCompleted && !item.video_url && item.video_status !== 'PENDING' && onQueueVideo && (
+          {(!isAlreadyPosted || item.video_status === 'FAILED') && !item.video_url && item.video_status !== 'PENDING' && onQueueVideo && (
             <button
               type="button"
               onClick={() => onQueueVideo(item)}
               className={`w-8 h-8 rounded-lg transition-all flex items-center justify-center border cursor-pointer shadow-sm ${
                 item.video_status === 'FAILED'
-                  ? 'bg-red-500/15 border-red-500/30 text-red-300 hover:bg-red-500/30 animate-pulse'
-                  : 'bg-fb-surface-hover border-white/5 text-fb-text-muted hover:bg-amber-500/20 hover:text-amber-300'
+                  ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/30'
+                  : 'bg-fb-surface-hover border-white/5 text-fb-text-muted hover:bg-cyan-500/20 hover:text-cyan-300'
               }`}
               title={
                 item.video_status === 'FAILED'
-                  ? `Muse tạo video bị lỗi: ${item.error_log || 'Thất bại'}. Bấm để thử lại tạo video Reel!`
-                  : "Đưa bài viết vào hàng đợi tạo Video Reel 15s (Muse AI)"
+                  ? `Video Reel bị lỗi: ${item.error_log || 'Thất bại'}. Bấm để đưa về hàng chờ làm lại video!`
+                  : "Đưa bài viết vào hàng đợi tạo Video Reel"
               }
             >
               <span className="material-symbols-outlined text-[16px]">
