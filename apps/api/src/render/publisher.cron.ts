@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ztteam_getReelsPath, ztteam_getImagesPath, ztteam_getStorageRoot } from '../common/ztteam_storage.util';
 import { TelegramService, ztteam_extractErrorMessage } from '../telegram/telegram.service';
+import { ztteam_getNewsComment } from '../common/ztteam_news_comment.util';
 
 /**
  * ZTTeam: Kho Mồi Kích Hoạt Đa Dạng (Dynamic Viral Hook Comments)
@@ -381,21 +382,16 @@ export class ZTTeamPublisherCron {
         description
       );
 
-      if (page.add_link_to_comment && reel.wp_post_url && response.id) {
+      if (page.add_link_to_comment && (reel.wp_post_url || trackingLink) && response.id) {
         try {
-          const commentPrefixes = [
-            '👉 Discover more here:',
-            '🔥 Read the full story:',
-            '📌 Check out the details:',
-            '👇 Full article link:',
-            '🔗 Learn more at:'
-          ];
-          const commentPrefix = commentPrefixes[Math.floor(Math.random() * commentPrefixes.length)];
-          await this.facebookService.ztteam_publishComment(
-            page.fb_page_id,
-            response.id,
-            `${commentPrefix} ${trackingLink}`
-          );
+          const commentText = ztteam_getNewsComment(trackingLink || reel.wp_post_url);
+          if (commentText) {
+            await this.facebookService.ztteam_publishComment(
+              page.fb_page_id,
+              response.id,
+              commentText
+            );
+          }
         } catch (e: any) {
           this.logger.error(`Failed to post comment for reel ${reel.id}: ${e.message}`);
         }
@@ -577,6 +573,27 @@ export class ZTTeamPublisherCron {
         );
       }
 
+      /** ZTTeam: Ngay khi dang thanh cong, gan link vao comment luon theo chuan tin tuc */
+      let hookCommentId: string | null = null;
+      if (fbPostId && (page.add_link_to_comment || image.wp_post_url)) {
+        try {
+          const newsComment = ztteam_getNewsComment(image.wp_post_url, image.ai_first_comment);
+          if (newsComment) {
+            const commentRes = await this.facebookService.ztteam_publishComment(
+              page.fb_page_id,
+              fbPostId,
+              newsComment
+            );
+            hookCommentId = typeof commentRes === 'object' && commentRes?.id
+              ? String(commentRes.id)
+              : (typeof commentRes === 'string' ? commentRes : null);
+            this.logger.log(`[Instant News Comment] Successfully posted comment for post ${fbPostId} (Comment ID: ${hookCommentId})`);
+          }
+        } catch (cmtErr: any) {
+          this.logger.error(`[Instant News Comment] Failed to post comment for post ${fbPostId}: ${cmtErr.message}`);
+        }
+      }
+
       await this.prisma.ztteam_images.update({
         where: { id: image.id },
         data: {
@@ -584,12 +601,14 @@ export class ZTTeamPublisherCron {
           posted_at: new Date(),
           fb_post_id: fbPostId,
           status: 'POSTED',
-          comment_step: 0,
+          comment_step: hookCommentId ? 2 : 0,
+          hook_comment_id: hookCommentId,
+          hook_comment_at: hookCommentId ? new Date() : null,
           post_retry_count: 0,
         }
       });
 
-      this.logger.log(`Successfully published image ${image.id} to page ${page.name}, Post ID: ${fbPostId} (Comment Step 0 scheduled)`);
+      this.logger.log(`Successfully published image ${image.id} to page ${page.name}, Post ID: ${fbPostId}${hookCommentId ? ' (Instant Comment posted)' : ''}`);
       this.eventEmitter.emit('image.posted', { imageId: image.id, pageId: page.id });
     } catch (error: any) {
       const extractedError = ztteam_extractErrorMessage(error);

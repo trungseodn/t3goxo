@@ -9,6 +9,7 @@ import { Observable, fromEvent } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { ZTTeamFacebookService } from '../facebook/facebook.service';
 import { ztteam_getReelsPath } from '../common/ztteam_storage.util';
+import { ztteam_getNewsComment } from '../common/ztteam_news_comment.util';
 
 /**
  * ZTTeamRenderController — API endpoints for managing reel rendering.
@@ -476,21 +477,16 @@ export class ZTTeamRenderController {
       );
 
       /** Check if we should add link to comment */
-      if (reel.page.add_link_to_comment && trackingLinkManual && response.id) {
+      if (reel.page.add_link_to_comment && (trackingLinkManual || reel.wp_post_url) && response.id) {
         try {
-          const commentPrefixes = [
-            '👉 Discover more here:',
-            '🔥 Read the full story:',
-            '📌 Check out the details:',
-            '👇 Full article link:',
-            '🔗 Learn more at:'
-          ];
-          const commentPrefix = commentPrefixes[Math.floor(Math.random() * commentPrefixes.length)];
-          await this.facebookService.ztteam_publishComment(
-            reel.page.fb_page_id,
-            response.id,
-            `${commentPrefix} ${trackingLinkManual}`
-          );
+          const commentText = ztteam_getNewsComment(trackingLinkManual || reel.wp_post_url);
+          if (commentText) {
+            await this.facebookService.ztteam_publishComment(
+              reel.page.fb_page_id,
+              response.id,
+              commentText
+            );
+          }
         } catch (e: any) {
           /** Ignore comment error so it doesn't fail the post status */
           console.error('Failed to post comment', e.message);

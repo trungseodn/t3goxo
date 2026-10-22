@@ -7,6 +7,7 @@ import { ZTTeamWordpressService } from '../wordpress/wordpress.service';
 import { ZTTeamStoryTestService } from '../story-test/story-test.service';
 import { ZTTeamHookVideoService } from '../media/hook-video.service';
 import { ztteam_getImagesPath, ztteam_getStorageRoot } from '../common/ztteam_storage.util';
+import { ztteam_getNewsComment, ZTTEAM_NEWS_CAPTION_CTA } from '../common/ztteam_news_comment.util';
 
 @Injectable()
 export class ZTTeamCrawlerService {
@@ -275,15 +276,14 @@ export class ZTTeamCrawlerService {
     let createdImageId: string | undefined = undefined;
 
     for (const targetPage of targetPages) {
-      /** Prepare Caption & First Comment based on Facebook Viral standard */
-      const captionCTA = '...FULL STORY IN THE COMMENT 👇👇👇';
+      /** Prepare Caption & First Comment based on News Publisher standard */
+      const captionCTA = ZTTEAM_NEWS_CAPTION_CTA;
       let fanpageCaption = `${titleUppercase}\n\n${part1}\n\n${captionCTA}`;
       if (targetPage.add_link_to_caption) {
-        fanpageCaption += `\n\n👉 Read full story here: ${wpResult.url}`;
+        fanpageCaption += `\n\nFull story: ${wpResult.url}`;
       }
 
-      const commentCTA = `👉 FULL STORY HERE 👇👇👇\n${wpResult.url}`;
-      let firstCommentText: string | null = part2 ? `${part2}\n\n${commentCTA}` : commentCTA;
+      const firstCommentText = ztteam_getNewsComment(wpResult.url);
 
       let imgRecord = await this.prisma.ztteam_images.findFirst({
         where: {
@@ -369,10 +369,9 @@ export class ZTTeamCrawlerService {
 
     /** ZTTeam: Trường hợp KHÔNG CÓ Fanpage nào hoạt động -> Lưu bài viết vào Kho Đăng Thủ Công độc lập (page_id = null) */
     if (targetPages.length === 0) {
-      const captionCTA = '...FULL STORY IN THE COMMENT 👇👇👇';
+      const captionCTA = ZTTEAM_NEWS_CAPTION_CTA;
       const fanpageCaption = `${titleUppercase}\n\n${part1}\n\n${captionCTA}`;
-      const commentCTA = `👉 FULL STORY HERE 👇👇👇\n${wpResult.url}`;
-      const firstCommentText = part2 ? `${part2}\n\n${commentCTA}` : commentCTA;
+      const firstCommentText = ztteam_getNewsComment(wpResult.url);
 
       let imgRecord = await this.prisma.ztteam_images.findFirst({
         where: {

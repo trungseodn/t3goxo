@@ -16,6 +16,7 @@ import { ZTTeamFetcherService } from '../crawler/fetcher.service';
 import { ZTTeamAIService } from '../ai/ai.service';
 import { ZTTeamStoryTestService } from '../story-test/story-test.service';
 import { ZTTeamHookVideoService } from '../media/hook-video.service';
+import { ztteam_getNewsComment } from '../common/ztteam_news_comment.util';
 
 @Controller('image')
 export class ZTTeamImageController {
@@ -521,7 +522,26 @@ export class ZTTeamImageController {
       }
     }
 
-    /** Quy trinh comment tu dong se duoc publisher.cron xu ly: sau 1 gio dang comment moi va sau 15 phut reply Part 2 + link */
+    /** ZTTeam: Ngay khi dang thanh cong, gan link vao comment luon theo chuan tin tuc */
+    let hookCommentId: string | null = null;
+    if (fbPostId && (targetPage.add_link_to_comment || image.wp_post_url)) {
+      try {
+        const newsComment = ztteam_getNewsComment(image.wp_post_url, image.ai_first_comment);
+        if (newsComment) {
+          const commentRes = await this.facebookService.ztteam_publishComment(
+            targetFbPageId,
+            fbPostId,
+            newsComment
+          );
+          hookCommentId = typeof commentRes === 'object' && commentRes?.id
+            ? String(commentRes.id)
+            : (typeof commentRes === 'string' ? commentRes : null);
+        }
+      } catch (cmtErr: any) {
+        this.logger.error(`Failed to post instant comment for image ${id}: ${cmtErr.message}`);
+      }
+    }
+
     const updatedImage = await this.prisma.ztteam_images.update({
       where: { id },
       data: {
@@ -529,7 +549,9 @@ export class ZTTeamImageController {
         posted_at: new Date(),
         fb_post_id: fbPostId,
         status: 'POSTED',
-        comment_step: 0,
+        comment_step: hookCommentId ? 2 : 0,
+        hook_comment_id: hookCommentId,
+        hook_comment_at: hookCommentId ? new Date() : null,
       }
     });
 

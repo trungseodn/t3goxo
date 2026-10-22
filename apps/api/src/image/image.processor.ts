@@ -12,6 +12,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ztteam_getImagesPath } from '../common/ztteam_storage.util';
 import { TelegramService } from '../telegram/telegram.service';
 import { ZTTeamWordpressService } from '../wordpress/wordpress.service';
+import { ztteam_getNewsComment, ZTTEAM_NEWS_CAPTION_CTA } from '../common/ztteam_news_comment.util';
 
 export interface ZTTeamImageJobData {
   imageId: string;
@@ -368,13 +369,12 @@ export class ZTTeamImageProcessor implements OnModuleInit {
       const postUrl = wpPostData?.link || image.wp_post_url || '';
 
       if (!isCurrentCaptionValid) {
-        const captionCTA = '...FULL STORY IN THE COMMENT 👇👇👇';
+        const captionCTA = ZTTEAM_NEWS_CAPTION_CTA;
         finalCaption = part1 ? `${titleUppercase}\n\n${part1}\n\n${captionCTA}` : `${titleUppercase}\n\n${captionCTA}`;
       }
 
       if (!isCurrentCommentValid) {
-        const commentCTA = postUrl ? `👉 FULL STORY HERE 👇👇👇\n${postUrl}` : '👉 FULL STORY IN THE LINK';
-        finalComment = part2 ? `${part2}\n\n${commentCTA}` : commentCTA;
+        finalComment = ztteam_getNewsComment(postUrl);
       }
     }
 
