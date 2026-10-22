@@ -524,7 +524,7 @@ export class ZTTeamImageController {
 
     /** ZTTeam: Ngay khi dang thanh cong, gan link vao comment luon theo chuan tin tuc */
     let hookCommentId: string | null = null;
-    if (fbPostId && (image.page?.add_link_to_comment || image.wp_post_url)) {
+    if (fbPostId && (image.wp_post_url || image.ai_first_comment)) {
       try {
         const newsComment = ztteam_getNewsComment(image.wp_post_url, image.ai_first_comment);
         if (newsComment) {

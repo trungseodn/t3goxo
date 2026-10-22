@@ -921,16 +921,16 @@ export default function FacebookPageSettings() {
                     <div className="flex items-start gap-2 bg-black/20 p-2.5 rounded-xl border border-white/5">
                       <span className="material-symbols-outlined text-cyan-400 text-[16px] mt-0.5 shrink-0">check_circle</span>
                       <div>
-                        <strong className="text-fb-text block">Caption sạch — Tránh bị Facebook bóp tương tác:</strong>
-                        <span>Không chèn link trực tiếp vào Caption. Hệ thống tự động gắn câu kết chuẩn: <code>...FULL STORY IN THE COMMENT 👇👇👇</code></span>
+                        <strong className="text-fb-text block">Caption chuẩn tin tức — Tránh bị Facebook bóp tương tác:</strong>
+                        <span>Không chèn link trực tiếp vào Caption. Hệ thống tự động gắn câu kết chuẩn tin tức: <code>...Full story in the comments</code></span>
                       </div>
                     </div>
 
                     <div className="flex items-start gap-2 bg-black/20 p-2.5 rounded-xl border border-white/5">
                       <span className="material-symbols-outlined text-emerald-400 text-[16px] mt-0.5 shrink-0">mark_chat_read</span>
                       <div>
-                        <strong className="text-fb-text block">Quy trình Bình luận 2 bước tối ưu Reach:</strong>
-                        <span><strong>Sau 60 phút:</strong> Tự động thả bình luận mồi câu "YES" kích hoạt thuật toán; <strong>Sau 15 phút tiếp theo:</strong> Tự động reply vào bình luận mồi kèm Part 2 và link website WordPress.</span>
+                        <strong className="text-fb-text block">Bình luận đính kèm tin tức (Instant Comment):</strong>
+                        <span>Ngay sau khi bài viết xuất bản thành công, hệ thống tự động gắn bình luận chứa link bài viết gốc theo chuẩn báo chí (Full story, Read more...), không dùng mồi câu YES hay chờ 1h/5h nữa.</span>
                       </div>
                     </div>
                   </div>
@@ -1308,7 +1308,7 @@ export default function FacebookPageSettings() {
                 <div>
                   <h3 className="text-base font-black text-fb-text">Lịch Sử Bài Viết Đã Đăng Fanpage</h3>
                   <p className="text-[11px] text-fb-text-muted mt-0.5">
-                    Tổng số {historyItems.length} bài viết đã xuất bản thành công lên Facebook kèm tiến trình bình luận 2 bước
+                    Tổng số {historyItems.length} bài viết đã xuất bản thành công lên Facebook kèm bình luận link
                   </p>
                 </div>
               </div>

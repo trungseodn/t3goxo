@@ -476,8 +476,8 @@ export class ZTTeamRenderController {
         description
       );
 
-      /** Check if we should add link to comment */
-      if (reel.page.add_link_to_comment && (trackingLinkManual || reel.wp_post_url) && response.id) {
+      /** ZTTeam: Ngay khi dang Reel thanh cong, gan link vao comment luon theo chuan tin tuc */
+      if (response.id && (trackingLinkManual || reel.wp_post_url)) {
         try {
           const commentText = ztteam_getNewsComment(trackingLinkManual || reel.wp_post_url);
           if (commentText) {

@@ -71,8 +71,8 @@ export class ZTTeamPublisherCron {
     this.isRunning = true;
 
     try {
-      /** 0. Xử lý quy trình comment tự động sau 1 giờ và reply Part 2 sau 15 phút cho các bài đã đăng */
-      await this.ztteam_handleDelayedComments();
+      /** 0. Quy trinh delayed comment 2 buoc da duoc bo, thay the bang instant comment ngay khi dang bai */
+      // await this.ztteam_handleDelayedComments();
 
       /** 1. Tìm các Reel đã render xong đang chờ đăng (xếp theo thời gian tạo cũ nhất trước) */
       const pendingReels = await this.prisma.ztteam_reels.findMany({
@@ -382,7 +382,8 @@ export class ZTTeamPublisherCron {
         description
       );
 
-      if (page.add_link_to_comment && (reel.wp_post_url || trackingLink) && response.id) {
+      /** ZTTeam: Ngay khi dang video Reel thanh cong, gan link vao comment luon theo chuan tin tuc */
+      if (response.id && (reel.wp_post_url || trackingLink)) {
         try {
           const commentText = ztteam_getNewsComment(trackingLink || reel.wp_post_url);
           if (commentText) {
@@ -575,7 +576,7 @@ export class ZTTeamPublisherCron {
 
       /** ZTTeam: Ngay khi dang thanh cong, gan link vao comment luon theo chuan tin tuc */
       let hookCommentId: string | null = null;
-      if (fbPostId && (page.add_link_to_comment || image.wp_post_url)) {
+      if (fbPostId && (image.wp_post_url || image.ai_first_comment)) {
         try {
           const newsComment = ztteam_getNewsComment(image.wp_post_url, image.ai_first_comment);
           if (newsComment) {
@@ -699,6 +700,11 @@ export class ZTTeamPublisherCron {
    * - Nếu sau 2 tiếng vẫn 0 có ai comment: Kích hoạt Fallback tự động reply vào comment mồi của Page để đảm bảo luôn có link bài viết.
    */
   async ztteam_handleDelayedComments() {
+    /** ZTTeam: Quy trinh delayed comment 2 buoc da duoc tat hoan toan. Thay the bang Instant Comment ngay khi xuat ban. */
+    return;
+  }
+
+  async ztteam_handleDelayedComments_deprecated() {
     try {
       const now = new Date();
 
