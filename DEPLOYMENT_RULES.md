@@ -35,8 +35,9 @@
 ## 2. QUY TẮC QUẢN TRỊ MÃ NGUỒN GIT
 
 1. **Cách ly tuyệt đối mã nguồn gốc**:
-   * Kho gốc `devzota/fb-bm-reel` đã được cấu hình cấm push (`push = DISABLE`).
-   * Không mở PR, không push commit nào lên `devzota/fb-bm-reel`.
+   * Cấu hình cấm push (`push = DISABLE`) chỉ áp dụng **cục bộ trong thư mục `d:\projects\t3.goxo.us` trên máy này**.
+   * **Không ảnh hưởng** đến các dự án khác hoặc máy tính khác của bạn; ở máy khác bạn vẫn push lên `devzota/fb-bm-reel` hoàn toàn bình thường.
+   * Trên máy này, thư mục này chỉ được push duy nhất vào repo mới `trungseodn/t3goxo`.
 2. **Kênh phát triển chính thống**:
    * Mọi tính năng, sửa lỗi và cập nhật đều được push trực tiếp lên kho Git mới của bạn:  
      👉 **`https://github.com/trungseodn/t3goxo`**
@@ -46,7 +47,26 @@
 
 ---
 
-## 3. QUY TRÌNH PHÁT TRIỂN & DEPLOY CHUẨN
+## 3. THÔNG TIN & QUY TẮC KẾT NỐI VPS QUA SSH
+
+1. **Thông tin đăng nhập**:
+   * **Host IP**: `169.58.210.160` (Port: `22`)
+   * **User**: `root`
+   * **SSH Key**: `C:\Users\OS\.ssh\vps2_t2_t3_may2_key` (hoặc key mặc định `C:\Users\OS\.ssh\id_ed25519`)
+   * **Thư mục dự án trên VPS**: `/root/ztreel-t3`
+2. **Cú pháp lệnh SSH chuẩn (sử dụng trong terminal / PowerShell)**:
+   * **Chạy lệnh trực tiếp qua PowerShell**:
+     ```powershell
+     & C:\Windows\System32\OpenSSH\ssh.exe -i "C:\Users\OS\.ssh\vps2_t2_t3_may2_key" -o StrictHostKeyChecking=no root@169.58.210.160 '<câu lệnh linux>'
+     ```
+   * **Quy tắc khi SSH vào VPS**:
+     * Luôn kèm cờ `-o StrictHostKeyChecking=no` để tránh prompt tương tác.
+     * Luôn dùng single quote `'...'` cho chuỗi lệnh remote để tránh lỗi phân tích cú pháp ký tự đặc biệt của PowerShell.
+     * Mọi lệnh kiểm tra trạng thái phải là Read-only. Chỉ thực thi lệnh ghi/rebuild khi có sự đồng ý của bạn.
+
+---
+
+## 4. QUY TRÌNH PHÁT TRIỂN & DEPLOY CHUẨN
 
 ```
 [1. Tiếp nhận Yêu cầu] 
