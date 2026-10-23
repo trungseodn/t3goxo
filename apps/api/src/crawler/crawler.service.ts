@@ -53,7 +53,16 @@ export class ZTTeamCrawlerService {
     pageId?: string;
     imageId?: string;
   }> {
-    const { sourceUrl, targetSiteId, pageId, addLinkToComment = true, sourceCategory, existingImageUrl, forceRecreate = false, keepContentImages = false } = params;
+    const {
+      sourceUrl,
+      targetSiteId,
+      pageId,
+      addLinkToComment = true,
+      sourceCategory,
+      existingImageUrl,
+      forceRecreate = false,
+      keepContentImages = true,
+    } = params;
 
     this.logger.log(`Starting Crawl -> 2K AI Image -> WordPress -> Fanpage pipeline for: ${sourceUrl}`);
 
@@ -515,7 +524,7 @@ export class ZTTeamCrawlerService {
       const extractRules = {
         addLinkToComment: data.addLinkToComment !== undefined ? data.addLinkToComment : true,
         batchSize: data.batchSize ? Math.max(1, Math.min(10, Number(data.batchSize))) : 1,
-        keepContentImages: Boolean(data.keepContentImages),
+        keepContentImages: data.keepContentImages !== undefined ? Boolean(data.keepContentImages) : true,
       };
       return await this.prisma.ztteam_crawl_sources.create({
         data: {

@@ -50,7 +50,7 @@ export default function WordPressSites() {
   const [sourceCategory, setSourceCategory] = useState('');
   const [frequencyCron, setFrequencyCron] = useState('0 */6 * * *');
   const [batchSize, setBatchSize] = useState<number>(1);
-  const [keepContentImages, setKeepContentImages] = useState(false);
+  const [keepContentImages, setKeepContentImages] = useState(true);
 
   /** Fanpages state */
   const [pages, setPages] = useState<any[]>([]);
@@ -69,7 +69,7 @@ export default function WordPressSites() {
   const [autoPageId, setAutoPageId] = useState('');
   const [autoCategory, setAutoCategory] = useState('');
   const [autoAddComment, setAutoAddComment] = useState(true);
-  const [autoKeepContentImages, setAutoKeepContentImages] = useState(false);
+  const [autoKeepContentImages, setAutoKeepContentImages] = useState(true);
   const [isAutoRunning, setIsAutoRunning] = useState(false);
   const [autoStepText, setAutoStepText] = useState('');
   const [autoResult, setAutoResult] = useState<any>(null);
@@ -209,7 +209,7 @@ export default function WordPressSites() {
     setSourceCategory('');
     setFrequencyCron('0 */6 * * *');
     setBatchSize(1);
-    setKeepContentImages(false);
+    setKeepContentImages(true);
   };
 
   const ztteam_handleEditSource = (source: CrawlSource) => {
@@ -221,10 +221,10 @@ export default function WordPressSites() {
     try {
       const rules = JSON.parse(source.extract_rules_json || '{}');
       setBatchSize(rules.batchSize ? Number(rules.batchSize) : 1);
-      setKeepContentImages(Boolean(rules.keepContentImages));
+      setKeepContentImages(rules.keepContentImages !== false);
     } catch (e) {
       setBatchSize(1);
-      setKeepContentImages(false);
+      setKeepContentImages(true);
     }
   };
 
@@ -262,7 +262,7 @@ export default function WordPressSites() {
     setAutoPageId('');
     setAutoCategory('');
     setAutoAddComment(true);
-    setAutoKeepContentImages(false);
+    setAutoKeepContentImages(true);
     setAutoResult(null);
     setAutoError('');
     setAutoStepText('');
@@ -349,7 +349,7 @@ export default function WordPressSites() {
     try {
       const response = await ztteam_testPost(siteId, {
         title: scrapeResult.title,
-        content: scrapeResult.contentHtml,
+        content: scrapeResult.cleanHtmlWithImages || scrapeResult.contentHtml,
         excerpt: scrapeResult.excerpt,
         imageUrl: scrapeResult.image || undefined
       });
@@ -629,7 +629,7 @@ export default function WordPressSites() {
                         </h5>
                         <div className="flex items-center gap-3">
                           <button
-                            onClick={() => { setShowSourceForm(site.id); setEditingSourceId(null); setSourceUrl(''); setSourceCategory(''); setFrequencyCron('0 */6 * * *'); setBatchSize(1); }}
+                            onClick={() => { setShowSourceForm(site.id); setEditingSourceId(null); setSourceUrl(''); setSourceCategory(''); setFrequencyCron('0 */6 * * *'); setBatchSize(1); setKeepContentImages(true); }}
                             className="text-cyan-400 hover:text-cyan-300 text-xs font-bold flex items-center gap-1 uppercase tracking-wide"
                           >
                             <span className="material-symbols-outlined text-base">add_circle</span>

@@ -322,10 +322,12 @@ export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
         }
 
         /** Call full automated pipeline: Crawl clean story -> SangTao.ai 2K Image -> WordPress + 2K Featured Image -> Queue Fanpage (luân phiên Least-Loaded) */
-        let keepContentImages = false;
+        let keepContentImages = true;
         try {
           const rules = JSON.parse(source.extract_rules_json || '{}');
-          keepContentImages = Boolean(rules.keepContentImages);
+          if (rules.keepContentImages !== undefined) {
+            keepContentImages = Boolean(rules.keepContentImages);
+          }
         } catch (e) {}
 
         const result = await this.crawlerService.ztteam_crawlAndPublishStory({

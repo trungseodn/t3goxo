@@ -394,11 +394,30 @@ export class ZTTeamFetcherService {
       throw new HttpException(`Không phải bài viết hợp lệ (${validation.reason})`, HttpStatus.BAD_REQUEST);
     }
 
-    /** ZTTeam: Chuẩn hóa HTML có chứa ảnh cho website đích */
-    let cleanHtmlWithImages = cleanContent.split(/\n\s*\n/).map(p => `<p>${p.trim()}</p>`).join('\n');
-    if (images.length > 0) {
-      const imgTags = images.map(img => `<p><img src="${img}" alt="" /></p>`).join('\n');
-      cleanHtmlWithImages = `${cleanHtmlWithImages}\n${imgTags}`;
+    /** ZTTeam: Chuẩn hóa HTML có chứa ảnh cho website đích (Phân bổ ảnh đều giữa các đoạn văn) */
+    let cleanHtmlWithImages = '';
+    const paragraphs = cleanContent.split(/\n\s*\n/).filter(p => p.trim());
+    if (images.length > 0 && paragraphs.length > 0) {
+      const step = Math.max(1, Math.floor(paragraphs.length / (images.length + 1)));
+      let imgIdx = 0;
+      const resultParts: string[] = [];
+      paragraphs.forEach((p, idx) => {
+        resultParts.push(`<p>${p.trim()}</p>`);
+        if ((idx + 1) % step === 0 && imgIdx < images.length) {
+          resultParts.push(`<p><img src="${images[imgIdx]}" alt="" /></p>`);
+          imgIdx++;
+        }
+      });
+      while (imgIdx < images.length) {
+        resultParts.push(`<p><img src="${images[imgIdx]}" alt="" /></p>`);
+        imgIdx++;
+      }
+      cleanHtmlWithImages = resultParts.join('\n');
+    } else {
+      cleanHtmlWithImages = paragraphs.map(p => `<p>${p.trim()}</p>`).join('\n');
+      if (images.length > 0) {
+        cleanHtmlWithImages += '\n' + images.map(img => `<p><img src="${img}" alt="" /></p>`).join('\n');
+      }
     }
 
     return {
@@ -406,7 +425,7 @@ export class ZTTeamFetcherService {
       image: featuredImage || images[0] || null,
       images: [...new Set(images)],
       content: cleanContent,
-      contentHtml: cleanContent,
+      contentHtml: cleanHtmlWithImages,
       cleanHtmlWithImages,
       excerpt: cleanContent.substring(0, 200),
       siteName: this.ztteam_extractDomain(url),
@@ -416,27 +435,85 @@ export class ZTTeamFetcherService {
 
   /**
    * ZTTeam: Làm sạch HTML bài viết nhưng giữ lại cấu trúc đoạn văn (<p>) và hình ảnh (<img>, <figure>)
+   * Xử lý tối ưu cho Lazy Loading, srcset, noscript và URL tương đối.
    */
   ztteam_cleanHtmlKeepImages(rawHtml: string, baseUrl: string): string {
     if (!rawHtml) return '';
     try {
       const $ = cheerio.load(rawHtml);
+
+      /** 1. Giữ lại thẻ <img> nằm trong <noscript> của các plugin LazyLoad trước khi xóa noscript */
+      $('noscript').each((_, el) => {
+        const noscriptHtml = $(el).html() || '';
+        if (noscriptHtml.includes('<img')) {
+          $(el).replaceWith(noscriptHtml);
+        } else {
+          $(el).remove();
+        }
+      });
+
       $('script, style, noscript, iframe, form, button, nav, header, footer, .sharedaddy, .ads, [data-widget-id], .author-box, .social-share, time, .breadcrumbs').remove();
 
       $('img').each((_, el) => {
-        let src = $(el).attr('src') || $(el).attr('data-src');
-        const rawSrcset = $(el).attr('srcset');
-        if (!src && rawSrcset) {
-          const srcset = rawSrcset.split(',')[0].trim().split(' ')[0];
-          src = srcset;
+        /** Ưu tiên lấy URL ảnh thực sự, bỏ qua các ảnh placeholder 1x1 hoặc base64 data: */
+        const candidateAttrs = [
+          'data-lazy-src',
+          'data-src',
+          'data-original',
+          'data-orig-file',
+          'data-hi-res-src',
+          'data-actualsrc',
+          'src'
+        ];
+
+        let realSrc = '';
+        for (const attr of candidateAttrs) {
+          const val = $(el).attr(attr);
+          if (val && typeof val === 'string') {
+            const trimmed = val.trim();
+            if (
+              !trimmed.startsWith('data:image/') &&
+              !trimmed.includes('blank.gif') &&
+              !trimmed.includes('spacer.gif') &&
+              !trimmed.includes('transparent.gif')
+            ) {
+              realSrc = trimmed;
+              break;
+            }
+          }
         }
-        if (src) {
+
+        /** Nếu chưa tìm thấy, thử bóc tách từ srcset / data-srcset */
+        if (!realSrc) {
+          const rawSrcset = $(el).attr('data-srcset') || $(el).attr('srcset');
+          if (rawSrcset) {
+            const parts = rawSrcset.split(',').map(s => s.trim().split(' ')[0]).filter(Boolean);
+            const nonDataParts = parts.filter(p => !p.startsWith('data:image/'));
+            if (nonDataParts.length > 0) {
+              realSrc = nonDataParts[nonDataParts.length - 1] || nonDataParts[0];
+            }
+          }
+        }
+
+        if (!realSrc) {
+          realSrc = $(el).attr('src') || '';
+        }
+
+        if (realSrc) {
           try {
-            src = new URL(src, baseUrl).href;
-            $(el).attr('src', src);
+            realSrc = new URL(realSrc, baseUrl).href;
+            $(el).attr('src', realSrc);
           } catch (e) {}
         }
-        $(el).removeAttr('srcset').removeAttr('sizes').removeAttr('loading').removeAttr('data-src');
+
+        $(el).removeAttr('srcset')
+             .removeAttr('data-srcset')
+             .removeAttr('sizes')
+             .removeAttr('loading')
+             .removeAttr('data-src')
+             .removeAttr('data-lazy-src')
+             .removeAttr('data-original')
+             .removeAttr('data-orig-file');
       });
 
       return $('body').html() || $.html();
@@ -664,12 +741,23 @@ export class ZTTeamFetcherService {
         cleanHtmlWithImages = this.ztteam_cleanHtmlKeepImages(html, url);
       }
 
+      /** Đồng bộ danh sách images từ cleanHtmlWithImages đã được chuẩn hóa */
+      if (cleanHtmlWithImages) {
+        const clean$ = cheerio.load(cleanHtmlWithImages);
+        clean$('img').each((_, el) => {
+          const src = clean$(el).attr('src');
+          if (src && src.startsWith('http') && !images.includes(src)) {
+            images.push(src);
+          }
+        });
+      }
+
       return {
         title,
         image,
         images: [...new Set(images)],
         content,
-        contentHtml,
+        contentHtml: cleanHtmlWithImages || contentHtml,
         cleanHtmlWithImages,
         excerpt,
         siteName: siteName || this.ztteam_extractDomain(url),

@@ -32,11 +32,13 @@ export class ZTTeamHtmlCleanerService {
       }
     });
 
-    /** 3. Handle <a> tags: remove external links or replace with text */
-    /** Let's remove the <a> tag but keep the inner text */
+    /** 3. Handle <a> tags: if contains <img>, unwrap keeping contents; otherwise replace with text */
     $('a').each((_, el) => {
-      const text = $(el).text();
-      $(el).replaceWith(text);
+      if ($(el).find('img').length > 0) {
+        $(el).replaceWith($(el).contents());
+      } else {
+        $(el).replaceWith($(el).text());
+      }
     });
 
     /** 4. Unwrap div and span tags to keep just the semantic structure (p, img, h1-h6) */
@@ -62,47 +64,84 @@ export class ZTTeamHtmlCleanerService {
       }
     });
 
-    /** 3. Process <img> tags */
+    /** 6. Process <img> tags */
     const images = $('img').toArray();
     for (const img of images) {
-      const src = $(img).attr('src');
+      let src = $(img).attr('src');
       if (!src) continue;
 
-      try {
-        /** Download image */
-        const response = await firstValueFrom(
-          this.httpService.get(src, { responseType: 'arraybuffer' })
-        );
+      /** Handle protocol-relative URL */
+      if (src.startsWith('//')) {
+        src = `https:${src}`;
+      }
 
-        const buffer = Buffer.from(response.data, 'binary');
-        const contentType = response.headers['content-type'] as string | undefined;
+      /** Skip 1x1 transparent placeholders */
+      if (src.startsWith('data:image/') && src.length < 200) {
+        $(img).remove();
+        continue;
+      }
+
+      try {
+        let buffer: Buffer;
+        let mimeType = 'image/jpeg';
         let ext = '.jpg';
-        
-        if (contentType) {
-          if (contentType.includes('png')) ext = '.png';
-          else if (contentType.includes('webp')) ext = '.webp';
-          else if (contentType.includes('gif')) ext = '.gif';
-          else if (contentType.includes('jpeg')) ext = '.jpg';
+
+        if (src.startsWith('data:image/')) {
+          const matches = src.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            mimeType = matches[1];
+            buffer = Buffer.from(matches[2], 'base64');
+            if (mimeType.includes('png')) ext = '.png';
+            else if (mimeType.includes('webp')) ext = '.webp';
+            else if (mimeType.includes('gif')) ext = '.gif';
+          } else {
+            $(img).remove();
+            continue;
+          }
         } else {
-           const parsedExt = extname(src.split('?')[0]);
-           if (parsedExt) ext = parsedExt;
+          /** Download image with browser headers and 15s timeout */
+          const response = await firstValueFrom(
+            this.httpService.get(src, {
+              responseType: 'arraybuffer',
+              timeout: 15000,
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+              }
+            })
+          );
+
+          buffer = Buffer.from(response.data);
+          const contentType = response.headers['content-type'] as string | undefined;
+
+          if (contentType) {
+            mimeType = contentType;
+            if (contentType.includes('png')) ext = '.png';
+            else if (contentType.includes('webp')) ext = '.webp';
+            else if (contentType.includes('gif')) ext = '.gif';
+            else if (contentType.includes('jpeg') || contentType.includes('jpg')) ext = '.jpg';
+          } else {
+            const parsedExt = extname(src.split('?')[0]);
+            if (parsedExt) ext = parsedExt;
+          }
         }
 
         const filename = `img_${Date.now()}_${Math.floor(Math.random() * 1000)}${ext}`;
-        
+
         /** Upload to WordPress */
-        const newUrl = await uploadMediaFn(buffer, filename, contentType || 'image/jpeg');
-        
-        /** Replace src */
+        const newUrl = await uploadMediaFn(buffer, filename, mimeType);
+
+        /** Replace src with newly uploaded WordPress URL */
         $(img).attr('src', newUrl);
         /** Remove lazy loading attributes if any */
         $(img).removeAttr('loading').removeAttr('srcset').removeAttr('sizes');
 
       } catch (error: any) {
-        this.logger.error(`Failed to process image: ${src}`, error.message);
-        /** If image fails, you might want to remove it or keep the original */
-        /** Let's remove it to keep content clean of broken external links */
-        $(img).remove();
+        this.logger.warn(`Failed to process or upload image: ${src} (${error.message}). Retaining original image.`);
+        /** If image upload fails, retain original remote URL if valid instead of deleting the image */
+        if (!src.startsWith('http://') && !src.startsWith('https://')) {
+          $(img).remove();
+        }
       }
     }
 
