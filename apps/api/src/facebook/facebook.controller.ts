@@ -60,6 +60,10 @@ export class ZTTeamFacebookController {
       videoEngine?: 'hook_image' | 'text_story' | 'muse';
       defaultBgm?: string;
       autoPublishEnabled?: boolean;
+      linkMode?: 'instant' | 'view_threshold' | 'disabled';
+      linkViewThreshold?: number;
+      linkTargetPlacement?: 'comment' | 'caption' | 'both';
+      linkFallbackAfterHours?: number;
     },
     @Request() req: any
   ) {

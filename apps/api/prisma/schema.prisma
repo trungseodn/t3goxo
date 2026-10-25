@@ -87,6 +87,10 @@ model ztteam_pages {
   auto_publish_enabled           Boolean  @default(true)
   add_link_to_caption            Boolean  @default(false)
   add_link_to_comment            Boolean  @default(false)
+  link_mode                      String   @default("instant") /** 'instant' | 'view_threshold' | 'disabled' */
+  link_view_threshold            Int      @default(1000)
+  link_target_placement          String   @default("comment") /** 'comment' | 'caption' | 'both' */
+  link_fallback_after_hours      Int      @default(12)
   schedule_mode                  String   @default("fixed") 
   schedule_fixed_times           String[] @default([]) 
   schedule_immediate_gap_minutes Int      @default(60) 
@@ -211,6 +215,11 @@ model ztteam_reels {
   posted_at         DateTime?
   fb_post_id        String?
   post_retry_count  Int       @default(0)
+  link_injected     Boolean   @default(false)
+  link_injected_at  DateTime?
+  link_injected_type String?
+  current_views     Int       @default(0)
+  last_view_checked_at DateTime?
   created_at      DateTime  @default(now())
   updated_at      DateTime  @updatedAt
 
@@ -259,6 +268,11 @@ model ztteam_images {
   posted_at         DateTime?
   fb_post_id        String?
   post_retry_count  Int       @default(0)
+  link_injected     Boolean   @default(false)
+  link_injected_at  DateTime?
+  link_injected_type String?
+  current_views     Int       @default(0)
+  last_view_checked_at DateTime?
   comment_step      Int       @default(0) /** 0: cho 1h, 1: da dang comment moi (cho doc gia hoac fallback 5h), 2: da reply Part 2 */
   hook_comment_id   String?
   hook_comment_at   DateTime?

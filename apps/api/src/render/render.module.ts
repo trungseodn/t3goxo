@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
 import { ZTTeamRenderProcessor } from './render.processor';
 import { ZTTeamRenderController } from './render.controller';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -8,10 +9,12 @@ import { ZTTeamMediaModule } from '../media/media.module';
 import { ZTTeamFacebookModule } from '../facebook/facebook.module';
 import { ZTTeamRenderCron } from './render.cron';
 import { ZTTeamPublisherCron } from './publisher.cron';
+import { ZTTeamLinkViewTrackerCron } from './link-tracker.cron';
 import { ZTTeamWordpressModule } from '../wordpress/wordpress.module';
 
 @Module({
   imports: [
+    HttpModule,
     PrismaModule, 
     ZTTeamAIModule, 
     ZTTeamAudioModule, 
@@ -20,7 +23,12 @@ import { ZTTeamWordpressModule } from '../wordpress/wordpress.module';
     ZTTeamWordpressModule
   ],
   controllers: [ZTTeamRenderController],
-  providers: [ZTTeamRenderProcessor, ZTTeamRenderCron, ZTTeamPublisherCron],
+  providers: [
+    ZTTeamRenderProcessor, 
+    ZTTeamRenderCron, 
+    ZTTeamPublisherCron,
+    ZTTeamLinkViewTrackerCron
+  ],
   exports: [ZTTeamRenderProcessor],
 })
 export class ZTTeamRenderModule {}

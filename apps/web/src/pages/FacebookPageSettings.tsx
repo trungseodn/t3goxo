@@ -47,6 +47,11 @@ export default function FacebookPageSettings() {
   const [autoPublishEnabled, setAutoPublishEnabled] = useState(true);
   const [addLinkToCaption, setAddLinkToCaption] = useState(false);
   const [addLinkToComment, setAddLinkToComment] = useState(false);
+  const [linkMode, setLinkMode] = useState<'instant' | 'view_threshold' | 'disabled'>('instant');
+  const [linkViewThreshold, setLinkViewThreshold] = useState<number>(1000);
+  const [linkTargetPlacement, setLinkTargetPlacement] = useState<'comment' | 'caption' | 'both'>('comment');
+  const [linkFallbackAfterHours, setLinkFallbackAfterHours] = useState<number>(12);
+  const [isFallbackEnabled, setIsFallbackEnabled] = useState<boolean>(true);
   const [scheduleMode, setScheduleMode] = useState('fixed');
   const [scheduleFixedTimes, setScheduleFixedTimes] = useState<string[]>([]);
   const [timeInput, setTimeInput] = useState('');
@@ -251,6 +256,12 @@ export default function FacebookPageSettings() {
       setAutoPublishEnabled(data.auto_publish_enabled !== undefined ? data.auto_publish_enabled : true);
       setAddLinkToCaption(data.add_link_to_caption || false);
       setAddLinkToComment(data.add_link_to_comment || false);
+      setLinkMode(data.link_mode || 'instant');
+      setLinkViewThreshold(data.link_view_threshold !== undefined ? data.link_view_threshold : 1000);
+      setLinkTargetPlacement(data.link_target_placement || 'comment');
+      const fallbackH = data.link_fallback_after_hours !== undefined ? data.link_fallback_after_hours : 12;
+      setLinkFallbackAfterHours(fallbackH);
+      setIsFallbackEnabled(fallbackH > 0);
       setScheduleMode(data.schedule_mode || 'fixed');
       setScheduleFixedTimes(data.schedule_fixed_times || []);
       setScheduleImmediateGap(data.schedule_immediate_gap_minutes || 60);
@@ -340,6 +351,10 @@ export default function FacebookPageSettings() {
         auto_publish_enabled: autoPublishEnabled,
         add_link_to_caption: false,
         add_link_to_comment: false,
+        link_mode: linkMode,
+        link_view_threshold: Number(linkViewThreshold) || 1000,
+        link_target_placement: linkTargetPlacement,
+        link_fallback_after_hours: isFallbackEnabled ? (Number(linkFallbackAfterHours) || 12) : 0,
         schedule_mode: scheduleMode,
         schedule_fixed_times: scheduleFixedTimes,
         schedule_immediate_gap_minutes: scheduleImmediateGap,
@@ -902,36 +917,205 @@ export default function FacebookPageSettings() {
                 </div>
               )}
 
-              {/** Cơ chế điều hướng Link & Tương tác thông minh 2 bước */}
+              {/** Cơ chế Điều Hướng Link & Gắn Link Theo Lượt Xem (View Threshold) */}
               <div className="pt-2">
-                <div className="bg-fb-surface-hover/30 p-4 rounded-2xl border border-fb-blue/20 space-y-3">
-                  <div className="flex items-center justify-between">
+                <div className="bg-fb-surface-hover/30 p-5 rounded-2xl border border-cyan-500/30 space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-white/5">
                     <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-cyan-400 text-[18px]">verified</span>
-                      <span className="text-xs font-bold text-fb-text uppercase tracking-wider">Cơ chế điều hướng Link & Tương tác 2 bước</span>
+                      <span className="material-symbols-outlined text-cyan-400 text-xl">link</span>
+                      <div>
+                        <span className="text-xs font-bold text-fb-text uppercase tracking-wider block">Cơ Chế Điều Hướng Link Bài Viết</span>
+                        <span className="text-[10px] text-fb-text-muted">Chống bóp tương tác khi mới đăng và hứng trọn traffic khi video cắn đề xuất</span>
+                      </div>
                     </div>
-                    <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                      Tự động 100%
+                    <span className="text-[10px] text-cyan-400 font-bold bg-cyan-500/10 px-2.5 py-0.5 rounded-full border border-cyan-500/20 font-mono">
+                      Viral Optimization
                     </span>
                   </div>
 
-                  <div className="space-y-2 text-[11px] text-fb-text-muted leading-relaxed">
-                    <div className="flex items-start gap-2 bg-black/20 p-2.5 rounded-xl border border-white/5">
-                      <span className="material-symbols-outlined text-cyan-400 text-[16px] mt-0.5 shrink-0">check_circle</span>
-                      <div>
-                        <strong className="text-fb-text block">Caption chuẩn tin tức — Tránh bị Facebook bóp tương tác:</strong>
-                        <span>Không chèn link trực tiếp vào Caption. Hệ thống tự động gắn câu kết chuẩn tin tức: <code>...Full story in the comments</code></span>
-                      </div>
-                    </div>
+                  {/** 1. CHỌN CHẾ ĐỘ GẮN LINK */}
+                  <div>
+                    <label className="block text-xs font-bold text-cyan-400 mb-2 uppercase tracking-wide">
+                      1. Chế Độ Gắn Link
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setLinkMode('view_threshold')}
+                        className={`p-3 rounded-xl border text-left transition-all ${
+                          linkMode === 'view_threshold'
+                            ? 'bg-cyan-500/15 border-cyan-500/60 text-white font-bold shadow-md shadow-cyan-500/10'
+                            : 'bg-slate-800/40 border-slate-700/60 text-fb-text-muted hover:border-slate-500'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="material-symbols-outlined text-cyan-400 text-base">trending_up</span>
+                          <span className="text-xs font-bold text-white">Theo Lượt Xem (View)</span>
+                        </div>
+                        <p className="text-[10px] text-slate-300 leading-tight">
+                          Đăng video sạch 100%. Tự động gắn link khi đạt mốc view (Khuyên dùng)
+                        </p>
+                      </button>
 
-                    <div className="flex items-start gap-2 bg-black/20 p-2.5 rounded-xl border border-white/5">
-                      <span className="material-symbols-outlined text-emerald-400 text-[16px] mt-0.5 shrink-0">mark_chat_read</span>
-                      <div>
-                        <strong className="text-fb-text block">Bình luận đính kèm tin tức (Instant Comment):</strong>
-                        <span>Ngay sau khi bài viết xuất bản thành công, hệ thống tự động gắn bình luận chứa link bài viết gốc theo chuẩn báo chí (Full story, Read more...), không dùng mồi câu YES hay chờ 1h/5h nữa.</span>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setLinkMode('instant')}
+                        className={`p-3 rounded-xl border text-left transition-all ${
+                          linkMode === 'instant'
+                            ? 'bg-cyan-500/15 border-cyan-500/60 text-white font-bold shadow-md shadow-cyan-500/10'
+                            : 'bg-slate-800/40 border-slate-700/60 text-fb-text-muted hover:border-slate-500'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="material-symbols-outlined text-blue-400 text-base">bolt</span>
+                          <span className="text-xs font-bold text-white">Gắn Ngay Lúc Đăng</span>
+                        </div>
+                        <p className="text-[10px] text-slate-300 leading-tight">
+                          Gắn link vào bình luận đầu tiên ngay lập tức khi xuất bản bài viết
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setLinkMode('disabled')}
+                        className={`p-3 rounded-xl border text-left transition-all ${
+                          linkMode === 'disabled'
+                            ? 'bg-cyan-500/15 border-cyan-500/60 text-white font-bold shadow-md shadow-cyan-500/10'
+                            : 'bg-slate-800/40 border-slate-700/60 text-fb-text-muted hover:border-slate-500'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="material-symbols-outlined text-slate-400 text-base">block</span>
+                          <span className="text-xs font-bold text-white">Tắt Gắn Link</span>
+                        </div>
+                        <p className="text-[10px] text-slate-300 leading-tight">
+                          Không chèn link điều hướng, tập trung tối đa nuôi tương tác cho Page
+                        </p>
+                      </button>
                     </div>
                   </div>
+
+                  {/** 2. CẤU HÌNH CHI TIẾT KHI CHỌN GẮN THEO VIEW */}
+                  {linkMode === 'view_threshold' && (
+                    <div className="bg-black/25 p-4 rounded-xl border border-white/5 space-y-4 animate-in fade-in duration-200">
+                      {/** Mốc View Kích Hoạt */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-xs font-bold text-amber-400 uppercase tracking-wide flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-[15px]">visibility</span>
+                            Ngưỡng View Kích Hoạt Gắn Link
+                          </label>
+                          <span className="text-[10px] text-amber-300 font-mono font-bold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                            Hiện tại: {linkViewThreshold.toLocaleString('vi-VN')} views
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-2">
+                          {[300, 500, 1000, 2000, 5000, 10000].map(cnt => (
+                            <button
+                              key={cnt}
+                              type="button"
+                              onClick={() => setLinkViewThreshold(cnt)}
+                              className={`py-2 px-2.5 rounded-lg border text-center transition-all text-xs font-bold ${
+                                linkViewThreshold === cnt
+                                  ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 shadow-sm'
+                                  : 'bg-slate-900/60 border-slate-700/60 text-slate-300 hover:border-slate-500'
+                              }`}
+                            >
+                              {cnt >= 1000 ? `${cnt / 1000}k view` : `${cnt} view`}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-fb-text-muted whitespace-nowrap">Hoặc nhập số view tùy chỉnh:</span>
+                          <input
+                            type="number"
+                            min={50}
+                            step={100}
+                            value={linkViewThreshold}
+                            onChange={(e) => setLinkViewThreshold(Math.max(50, Number(e.target.value) || 0))}
+                            className="w-32 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-amber-400 font-mono"
+                          />
+                          <span className="text-[11px] text-fb-text-muted">lượt xem</span>
+                        </div>
+                      </div>
+
+                      {/** Vị trí gắn link */}
+                      <div className="pt-2 border-t border-white/5">
+                        <label className="block text-xs font-bold text-fb-text uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-[15px] text-cyan-400">place</span>
+                          Vị Trí Gắn Link Trên Facebook
+                        </label>
+                        <CustomDropdown
+                          value={linkTargetPlacement}
+                          onChange={(val) => setLinkTargetPlacement(val as any)}
+                          options={[
+                            { value: 'comment', label: '💬 Bình luận đầu tiên (First Comment / Pinned Comment) — An toàn nhất cho Reels' },
+                            { value: 'caption', label: '📝 Chỉnh sửa trực tiếp vào Caption bài viết' },
+                            { value: 'both', label: '⚡ Cả Bình luận & Caption (Tối đa hóa lượt nhấp chuột)' }
+                          ]}
+                          className="w-full"
+                        />
+                      </div>
+
+                      {/** Cơ chế dự phòng Fallback theo thời gian */}
+                      <div className="pt-2 border-t border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-fb-text">Dự Phòng Theo Thời Gian (Fallback)</span>
+                            <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                              Chống Lỡ Traffic
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-fb-text-muted mt-0.5">
+                            Nếu sau số giờ quy định video vẫn chưa đạt mốc view, hệ thống sẽ tự động gắn link.
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3 shrink-0">
+                          {isFallbackEnabled && (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-fb-text-muted">Sau:</span>
+                              <input
+                                type="number"
+                                min={1}
+                                max={72}
+                                value={linkFallbackAfterHours}
+                                onChange={(e) => setLinkFallbackAfterHours(Math.max(1, Number(e.target.value) || 12))}
+                                className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white text-center focus:outline-none focus:border-cyan-400 font-mono"
+                              />
+                              <span className="text-[11px] text-fb-text-muted">giờ</span>
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setIsFallbackEnabled(!isFallbackEnabled)}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                              isFallbackEnabled ? 'bg-cyan-500' : 'bg-black/30 shadow-inner border border-white/5'
+                            }`}
+                          >
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isFallbackEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {linkMode === 'instant' && (
+                    <div className="flex items-start gap-2 bg-black/20 p-2.5 rounded-xl border border-white/5 text-[11px] text-fb-text-muted">
+                      <span className="material-symbols-outlined text-blue-400 text-base mt-0.5 shrink-0">info</span>
+                      <span>Hệ thống sẽ tự động gắn bình luận chứa link bài viết gốc ngay khi video xuất bản thành công lên Facebook.</span>
+                    </div>
+                  )}
+
+                  {linkMode === 'disabled' && (
+                    <div className="flex items-start gap-2 bg-black/20 p-2.5 rounded-xl border border-white/5 text-[11px] text-fb-text-muted">
+                      <span className="material-symbols-outlined text-slate-400 text-base mt-0.5 shrink-0">info</span>
+                      <span>Bài viết và video sẽ được đăng hoàn toàn sạch 100%, không kèm bất kỳ liên kết ngoài nào.</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

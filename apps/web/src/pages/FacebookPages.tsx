@@ -646,6 +646,10 @@ export default function FacebookPages() {
   const [bulkPostsPerDay, setBulkPostsPerDay] = useState<number>(4);
   const [bulkAutoPublish, setBulkAutoPublish] = useState<boolean>(true);
   const [bulkBgmList, setBulkBgmList] = useState<any[]>([]);
+  const [bulkLinkMode, setBulkLinkMode] = useState<'instant' | 'view_threshold' | 'disabled'>('view_threshold');
+  const [bulkLinkViewThreshold, setBulkLinkViewThreshold] = useState<number>(1000);
+  const [bulkLinkPlacement, setBulkLinkPlacement] = useState<'comment' | 'caption' | 'both'>('comment');
+  const [bulkLinkFallbackHours, setBulkLinkFallbackHours] = useState<number>(12);
 
   /** State Modal Đổi Hạng Mục (Category) Hàng Loạt */
   const [isBulkCategoryModalOpen, setIsBulkCategoryModalOpen] = useState(false);
@@ -796,6 +800,10 @@ export default function FacebookPages() {
         videoEngine: bulkVideoEngine,
         defaultBgm: bulkDefaultBgm || undefined,
         autoPublishEnabled: bulkAutoPublish,
+        linkMode: bulkLinkMode,
+        linkViewThreshold: bulkLinkViewThreshold,
+        linkTargetPlacement: bulkLinkPlacement,
+        linkFallbackAfterHours: bulkLinkFallbackHours,
       });
       if (res.data?.success) {
         ztteam_showToast(res.data.message || 'Áp dụng cài đặt hàng loạt thành công!', 'success');
@@ -2016,7 +2024,101 @@ export default function FacebookPages() {
                 </div>
               </div>
 
-              {/** PHẦN 3: TÙY CHỌN TỰ ĐỘNG ĐĂNG BÀI */}
+              {/** PHẦN 3: CẤU HÌNH ĐIỀU HƯỚNG LINK BÀI VIẾT */}
+              <div className="bg-fb-surface-hover/20 p-4 rounded-2xl border border-fb-surface-hover/40 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-cyan-400 font-bold uppercase tracking-wider text-[11px]">
+                    <span className="material-symbols-outlined text-base">link</span>
+                    <span>3. Điều Hướng Link Bài Viết (Tối Ưu Viral Reels)</span>
+                  </div>
+                  <span className="text-[10px] text-cyan-300 font-bold bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20">
+                    Áp dụng cho {selectedPageIds.length} Page
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBulkLinkMode('view_threshold')}
+                    className={`p-2.5 rounded-xl border text-left transition-all ${
+                      bulkLinkMode === 'view_threshold'
+                        ? 'bg-cyan-500/20 border-cyan-500/60 text-white font-bold shadow-sm'
+                        : 'bg-slate-800/40 border-slate-700/60 text-fb-text-muted hover:border-slate-500'
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-white block">🎯 Theo Lượt Xem</span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Đạt view mới gắn link</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setBulkLinkMode('instant')}
+                    className={`p-2.5 rounded-xl border text-left transition-all ${
+                      bulkLinkMode === 'instant'
+                        ? 'bg-cyan-500/20 border-cyan-500/60 text-white font-bold shadow-sm'
+                        : 'bg-slate-800/40 border-slate-700/60 text-fb-text-muted hover:border-slate-500'
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-white block">⚡ Gắn Ngay Lúc Đăng</span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Gắn vào comment tức thì</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setBulkLinkMode('disabled')}
+                    className={`p-2.5 rounded-xl border text-left transition-all ${
+                      bulkLinkMode === 'disabled'
+                        ? 'bg-cyan-500/20 border-cyan-500/60 text-white font-bold shadow-sm'
+                        : 'bg-slate-800/40 border-slate-700/60 text-fb-text-muted hover:border-slate-500'
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-white block">🚫 Tắt Gắn Link</span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Nuôi tương tác sạch 100%</span>
+                  </button>
+                </div>
+
+                {bulkLinkMode === 'view_threshold' && (
+                  <div className="pt-2 border-t border-slate-700/40 space-y-2.5 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-amber-300">Ngưỡng View Kích Hoạt:</span>
+                      <div className="flex items-center gap-1.5">
+                        {[500, 1000, 2000, 5000].map(cnt => (
+                          <button
+                            key={cnt}
+                            type="button"
+                            onClick={() => setBulkLinkViewThreshold(cnt)}
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold border transition-all ${
+                              bulkLinkViewThreshold === cnt
+                                ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                                : 'bg-slate-900 border-slate-700 text-slate-400'
+                            }`}
+                          >
+                            {cnt >= 1000 ? `${cnt / 1000}k` : cnt}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-slate-300">Vị trí gắn:</span>
+                      <div className="w-56">
+                        <CustomDropdown
+                          value={bulkLinkPlacement}
+                          onChange={(val) => setBulkLinkPlacement(val as any)}
+                          options={[
+                            { value: 'comment', label: '💬 Bình luận (Comment)' },
+                            { value: 'caption', label: '📝 Cập nhật Caption' },
+                            { value: 'both', label: '⚡ Cả Comment & Caption' }
+                          ]}
+                          className="w-full text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/** PHẦN 4: TÙY CHỌN TỰ ĐỘNG ĐĂNG BÀI */}
               <div className="bg-fb-surface-hover/20 p-3.5 rounded-2xl border border-fb-surface-hover/40 flex items-center justify-between">
                 <div>
                   <span className="font-bold text-fb-text block">Tự Động Xuất Bản (Auto Publish)</span>

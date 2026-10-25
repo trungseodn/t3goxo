@@ -781,6 +781,10 @@ export class ZTTeamFacebookService {
       auto_publish_enabled: page.auto_publish_enabled,
       add_link_to_caption: page.add_link_to_caption,
       add_link_to_comment: page.add_link_to_comment,
+      link_mode: (page as any).link_mode || 'instant',
+      link_view_threshold: (page as any).link_view_threshold !== undefined ? (page as any).link_view_threshold : 1000,
+      link_target_placement: (page as any).link_target_placement || 'comment',
+      link_fallback_after_hours: (page as any).link_fallback_after_hours !== undefined ? (page as any).link_fallback_after_hours : 12,
       schedule_mode: page.schedule_mode,
       schedule_fixed_times: page.schedule_fixed_times,
       schedule_immediate_gap_minutes: page.schedule_immediate_gap_minutes,
@@ -841,6 +845,10 @@ export class ZTTeamFacebookService {
       auto_publish_enabled: config.auto_publish_enabled !== undefined ? config.auto_publish_enabled : true,
       add_link_to_caption: config.add_link_to_caption,
       add_link_to_comment: config.add_link_to_comment,
+      link_mode: config.link_mode !== undefined ? config.link_mode : 'instant',
+      link_view_threshold: config.link_view_threshold !== undefined ? Number(config.link_view_threshold) : 1000,
+      link_target_placement: config.link_target_placement || 'comment',
+      link_fallback_after_hours: config.link_fallback_after_hours !== undefined ? Number(config.link_fallback_after_hours) : 12,
       schedule_mode: config.schedule_mode,
       schedule_fixed_times: config.schedule_fixed_times,
       schedule_immediate_gap_minutes: config.schedule_immediate_gap_minutes,
@@ -991,6 +999,10 @@ export class ZTTeamFacebookService {
       videoEngine?: 'hook_image' | 'text_story' | 'muse';
       defaultBgm?: string;
       autoPublishEnabled?: boolean;
+      linkMode?: 'instant' | 'view_threshold' | 'disabled';
+      linkViewThreshold?: number;
+      linkTargetPlacement?: 'comment' | 'caption' | 'both';
+      linkFallbackAfterHours?: number;
     }
   ) {
     const {
@@ -1000,7 +1012,11 @@ export class ZTTeamFacebookService {
       postFormat,
       videoEngine,
       defaultBgm,
-      autoPublishEnabled
+      autoPublishEnabled,
+      linkMode,
+      linkViewThreshold,
+      linkTargetPlacement,
+      linkFallbackAfterHours
     } = data;
 
     if (!pageIds || pageIds.length === 0) {
@@ -1077,6 +1093,18 @@ export class ZTTeamFacebookService {
       }
       if (defaultBgm !== undefined) {
         updateData.default_bgm = defaultBgm || null;
+      }
+      if (linkMode) {
+        updateData.link_mode = linkMode;
+      }
+      if (linkViewThreshold !== undefined) {
+        updateData.link_view_threshold = Number(linkViewThreshold);
+      }
+      if (linkTargetPlacement) {
+        updateData.link_target_placement = linkTargetPlacement;
+      }
+      if (linkFallbackAfterHours !== undefined) {
+        updateData.link_fallback_after_hours = Number(linkFallbackAfterHours);
       }
 
       await this.prisma.ztteam_pages.update({
@@ -3014,6 +3042,119 @@ export class ZTTeamFacebookService {
       type,
       url: storageUrl,
       localPath: targetPath,
+    };
+  }
+
+  /**
+   * ZTTeam: Cập nhật nội dung Caption của bài viết hoặc Video/Reel trên Facebook
+   */
+  async ztteam_updatePostCaption(fbPageId: string, postId: string, message: string, isVideo = false) {
+    const page = await this.prisma.ztteam_pages.findFirst({
+      where: {
+        OR: [{ fb_page_id: fbPageId }, { id: fbPageId }],
+      },
+    });
+
+    if (!page || !page.page_token_encrypted) {
+      throw new BadRequestException('Fanpage không tồn tại hoặc chưa có Token hợp lệ');
+    }
+
+    try {
+      const payload: any = {
+        access_token: page.page_token_encrypted,
+      };
+      if (isVideo) {
+        payload.description = message;
+      } else {
+        payload.message = message;
+      }
+
+      const res = await firstValueFrom(
+        this.httpService.post(
+          `https://graph.facebook.com/${this.API_VERSION}/${postId}`,
+          null,
+          { params: payload }
+        )
+      );
+      return res.data;
+    } catch (err: any) {
+      const errMsg = err.response?.data?.error?.message || err.message;
+      this.logger.error(`Lỗi cập nhật caption cho post ${postId} trên Page ${page.name}: ${errMsg}`);
+      throw err;
+    }
+  }
+
+  /**
+   * ZTTeam: Tự động chèn Link bài viết vào Comment hoặc Caption khi đạt ngưỡng view
+   */
+  async ztteam_injectLinkToPost(params: {
+    page: any;
+    postId: string;
+    wpPostUrl: string;
+    placement: 'comment' | 'caption' | 'both';
+    currentCaption?: string | null;
+    isVideo?: boolean;
+    utmSource?: string;
+  }) {
+    const { page, postId, wpPostUrl, placement, currentCaption = '', isVideo = false, utmSource = 'reel' } = params;
+    if (!postId || !wpPostUrl) return { success: false, error: 'Thiếu postId hoặc wpPostUrl' };
+
+    const slugify = (text: string) => {
+      if (!text) return '';
+      return text.toString().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').trim();
+    };
+
+    const utmMedium = slugify(page?.fb_account?.name || 'account');
+    const utmCampaign = slugify(page?.name || 'page');
+    const trackingLink = `${wpPostUrl}${wpPostUrl.includes('?') ? '&' : '?'}utm_source=${utmSource}&utm_medium=${utmMedium}&utm_campaign=${utmCampaign}`;
+
+    let commentSuccess = false;
+    let captionSuccess = false;
+
+    // 1. Chèn vào Comment
+    if (placement === 'comment' || placement === 'both') {
+      try {
+        const { ztteam_getNewsComment } = require('../common/ztteam_news_comment.util');
+        const commentText = ztteam_getNewsComment(trackingLink);
+        if (commentText) {
+          await this.ztteam_publishComment(page.fb_page_id, postId, commentText);
+          commentSuccess = true;
+          this.logger.log(`[Link Injection] Đã gắn link vào comment bài ${postId} trên Page "${page.name}"`);
+        }
+      } catch (cmtErr: any) {
+        this.logger.error(`[Link Injection] Lỗi gắn comment cho bài ${postId}: ${cmtErr.message}`);
+      }
+    }
+
+    // 2. Chèn vào Caption
+    if (placement === 'caption' || placement === 'both') {
+      try {
+        const prefixes = [
+          '👉 Discover more here:',
+          '🔥 Read the full story:',
+          '📌 Check out the details:',
+          '👇 Full article link:',
+          '🔗 Learn more at:'
+        ];
+        const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+        const cleanOldCaption = (currentCaption || '').split(/\n\n.*utm_source=/)[0].trim();
+        const newCaption = `${cleanOldCaption}\n\n${prefix} ${trackingLink}`;
+
+        await this.ztteam_updatePostCaption(page.fb_page_id, postId, newCaption, isVideo);
+        captionSuccess = true;
+        this.logger.log(`[Link Injection] Đã cập nhật caption bài ${postId} trên Page "${page.name}"`);
+      } catch (capErr: any) {
+        this.logger.error(`[Link Injection] Lỗi cập nhật caption cho bài ${postId}: ${capErr.message}`);
+      }
+    }
+
+    return {
+      success: commentSuccess || captionSuccess,
+      commentSuccess,
+      captionSuccess,
+      placement,
     };
   }
 }

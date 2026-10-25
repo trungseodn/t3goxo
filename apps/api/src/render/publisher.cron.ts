@@ -364,7 +364,9 @@ export class ZTTeamPublisherCron {
       const utmCampaign = slugify(page?.name || 'page');
       const trackingLink = reel.wp_post_url ? `${reel.wp_post_url}${reel.wp_post_url.includes('?') ? '&' : '?'}utm_source=reel&utm_medium=${utmMedium}&utm_campaign=${utmCampaign}` : '';
 
-      if (page.add_link_to_caption && reel.wp_post_url) {
+      const shouldAttachLinkNow = (page as any).link_mode !== 'view_threshold' && (page as any).link_mode !== 'disabled';
+
+      if (shouldAttachLinkNow && page.add_link_to_caption && reel.wp_post_url) {
         const prefixes = [
           '👉 Discover more here:',
           '🔥 Read the full story:',
@@ -382,8 +384,9 @@ export class ZTTeamPublisherCron {
         description
       );
 
-      /** ZTTeam: Ngay khi dang video Reel thanh cong, gan link vao comment luon theo chuan tin tuc */
-      if (response.id && (reel.wp_post_url || trackingLink)) {
+      let linkInjected = false;
+      /** ZTTeam: Ngay khi dang video Reel thanh cong, gan link vao comment luon neu link_mode khong phai view_threshold */
+      if (shouldAttachLinkNow && response.id && (reel.wp_post_url || trackingLink)) {
         try {
           const commentText = ztteam_getNewsComment(trackingLink || reel.wp_post_url);
           if (commentText) {
@@ -392,6 +395,7 @@ export class ZTTeamPublisherCron {
               response.id,
               commentText
             );
+            linkInjected = true;
           }
         } catch (e: any) {
           this.logger.error(`Failed to post comment for reel ${reel.id}: ${e.message}`);
@@ -406,6 +410,9 @@ export class ZTTeamPublisherCron {
           posted_at: new Date(),
           fb_post_id: response.id,
           post_retry_count: 0,
+          link_injected: linkInjected,
+          link_injected_at: linkInjected ? new Date() : null,
+          link_injected_type: linkInjected ? 'comment' : null,
         }
       });
 
@@ -530,7 +537,9 @@ export class ZTTeamPublisherCron {
       const utmCampaign = slugify(page?.name || 'page');
       const trackingLink = image.wp_post_url ? `${image.wp_post_url}${image.wp_post_url.includes('?') ? '&' : '?'}utm_source=image&utm_medium=${utmMedium}&utm_campaign=${utmCampaign}` : '';
 
-      if (page.add_link_to_caption && image.wp_post_url) {
+      const shouldAttachLinkNow = (page as any).link_mode !== 'view_threshold' && (page as any).link_mode !== 'disabled';
+
+      if (shouldAttachLinkNow && page.add_link_to_caption && image.wp_post_url) {
         const prefixes = [
           '👉 Discover more here:',
           '🔥 Read the full story:',
@@ -574,9 +583,10 @@ export class ZTTeamPublisherCron {
         );
       }
 
-      /** ZTTeam: Ngay khi dang thanh cong, gan link vao comment luon theo chuan tin tuc */
+      /** ZTTeam: Ngay khi dang thanh cong, gan link vao comment luon neu link_mode khong phai view_threshold */
       let hookCommentId: string | null = null;
-      if (fbPostId && (image.wp_post_url || image.ai_first_comment)) {
+      let linkInjected = false;
+      if (shouldAttachLinkNow && fbPostId && (image.wp_post_url || image.ai_first_comment)) {
         try {
           const newsComment = ztteam_getNewsComment(image.wp_post_url, image.ai_first_comment);
           if (newsComment) {
@@ -588,6 +598,7 @@ export class ZTTeamPublisherCron {
             hookCommentId = typeof commentRes === 'object' && commentRes?.id
               ? String(commentRes.id)
               : (typeof commentRes === 'string' ? commentRes : null);
+            linkInjected = true;
             this.logger.log(`[Instant News Comment] Successfully posted comment for post ${fbPostId} (Comment ID: ${hookCommentId})`);
           }
         } catch (cmtErr: any) {
@@ -605,6 +616,9 @@ export class ZTTeamPublisherCron {
           comment_step: hookCommentId ? 2 : 0,
           hook_comment_id: hookCommentId,
           hook_comment_at: hookCommentId ? new Date() : null,
+          link_injected: linkInjected,
+          link_injected_at: linkInjected ? new Date() : null,
+          link_injected_type: linkInjected ? 'comment' : null,
           post_retry_count: 0,
         }
       });
