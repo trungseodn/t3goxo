@@ -2848,4 +2848,173 @@ export class ZTTeamFacebookService {
       results,
     };
   }
+
+  /**
+   * ZTTeam: Đổi Hạng Mục (Category) hàng loạt cho các Fanpage qua Facebook Graph API
+   */
+  async ztteam_bulkUpdateCategory(dto: {
+    pageIds: string[];
+    categoryId: string;
+    categoryName: string;
+  }) {
+    const { pageIds, categoryId, categoryName } = dto;
+    if (!pageIds || !Array.isArray(pageIds) || pageIds.length === 0) {
+      throw new BadRequestException('Danh sách Fanpage không được rỗng');
+    }
+    if (!categoryId) {
+      throw new BadRequestException('Vui lòng chọn hoặc nhập ID Hạng mục');
+    }
+
+    const pages = await this.prisma.ztteam_pages.findMany({
+      where: { id: { in: pageIds } },
+    });
+
+    this.logger.log(`[Bulk Category] Bắt đầu đổi hạng mục sang "${categoryName}" (${categoryId}) cho ${pages.length} Fanpage...`);
+
+    const results: any[] = [];
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i];
+      if (!page.page_token_encrypted) {
+        failCount++;
+        results.push({
+          pageId: page.id,
+          name: page.name,
+          success: false,
+          error: 'Fanpage chưa có Token hoặc Token đã hết hạn',
+        });
+        continue;
+      }
+
+      try {
+        /** Gọi Facebook Graph API cập nhật category_list */
+        await firstValueFrom(
+          this.httpService.post(
+            `https://graph.facebook.com/${this.API_VERSION}/${page.fb_page_id}`,
+            null,
+            {
+              params: {
+                category_list: JSON.stringify([categoryId]),
+                access_token: page.page_token_encrypted,
+              },
+            }
+          )
+        );
+
+        /** Cập nhật cột category trong DB */
+        await this.prisma.ztteam_pages.update({
+          where: { id: page.id },
+          data: {
+            category: categoryName || String(categoryId),
+          },
+        });
+
+        successCount++;
+        results.push({
+          pageId: page.id,
+          name: page.name,
+          success: true,
+          category: categoryName,
+        });
+        this.logger.log(`[Bulk Category] [${i + 1}/${pages.length}] Đổi hạng mục thành công cho Page "${page.name}"`);
+      } catch (err: any) {
+        failCount++;
+        const errMsg = err.response?.data?.error?.message || err.message || 'Lỗi từ Facebook API';
+        this.logger.error(`[Bulk Category] [${i + 1}/${pages.length}] Lỗi đổi hạng mục cho Page "${page.name}": ${errMsg}`);
+        results.push({
+          pageId: page.id,
+          name: page.name,
+          success: false,
+          error: errMsg,
+        });
+      }
+
+      /** Giãn cách 400ms giữa các request */
+      if (i < pages.length - 1) {
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    }
+
+    return {
+      success: true,
+      totalRequested: pages.length,
+      successCount,
+      failCount,
+      categoryId,
+      categoryName,
+      results,
+    };
+  }
+
+  /**
+   * ZTTeam: Tải ảnh đại diện hoặc ảnh bìa Fanpage thủ công lên lưu trữ hệ thống
+   */
+  async ztteam_uploadBrandingAsset(
+    pageId: string,
+    file: any,
+    type: 'avatar' | 'cover',
+  ) {
+    if (!file) {
+      throw new BadRequestException('Không tìm thấy file ảnh');
+    }
+    if (type !== 'avatar' && type !== 'cover') {
+      throw new BadRequestException('Loại ảnh không hợp lệ (chỉ hỗ trợ avatar hoặc cover)');
+    }
+
+    const page = await this.prisma.ztteam_pages.findFirst({
+      where: {
+        OR: [{ id: pageId }, { fb_page_id: pageId }],
+      },
+    });
+    if (!page) {
+      throw new BadRequestException('Không tìm thấy Fanpage');
+    }
+
+    const fs = require('fs');
+    const path = require('path');
+    const { ztteam_getStorageRoot } = require('../common/ztteam_storage.util');
+
+    const storageDir = path.join(ztteam_getStorageRoot(), 'branding');
+    if (!fs.existsSync(storageDir)) {
+      fs.mkdirSync(storageDir, { recursive: true });
+    }
+
+    let ext = 'png';
+    if (file.mimetype === 'image/jpeg' || file.originalname?.endsWith('.jpg') || file.originalname?.endsWith('.jpeg')) {
+      ext = 'jpg';
+    } else if (file.mimetype === 'image/webp' || file.originalname?.endsWith('.webp')) {
+      ext = 'webp';
+    }
+
+    const filename = `manual_${page.id}_${type}_${Date.now()}.${ext}`;
+    const targetPath = path.join(storageDir, filename);
+
+    if (file.path && fs.existsSync(file.path)) {
+      fs.copyFileSync(file.path, targetPath);
+      try { fs.unlinkSync(file.path); } catch (e) {}
+    } else if (file.buffer) {
+      fs.writeFileSync(targetPath, file.buffer);
+    }
+
+    const storageUrl = `/storage/branding/${filename}`;
+
+    /** Cập nhật DB để F5 vẫn hiển thị ảnh này */
+    await this.prisma.ztteam_pages.update({
+      where: { id: page.id },
+      data: {
+        ...(type === 'avatar' ? { branding_avatar_url: storageUrl } : { branding_cover_url: storageUrl }),
+      },
+    });
+
+    return {
+      success: true,
+      message: `Tải ${type === 'avatar' ? 'Ảnh đại diện' : 'Ảnh bìa'} lên thành công!`,
+      type,
+      url: storageUrl,
+      localPath: targetPath,
+    };
+  }
 }
+

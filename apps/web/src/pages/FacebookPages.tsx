@@ -8,6 +8,25 @@ import api from '../services/api';
 import CustomDropdown from '../components/CustomDropdown';
 import { useWordpressStore } from '../stores/wordpressStore';
 
+/** Danh sách Hạng Mục (Categories) Facebook chuẩn thông dụng */
+const FB_POPULAR_CATEGORIES = [
+  { id: '196739023685716', name: 'News & media website', group: 'Tin Tức & Truyền Thông', desc: 'Trang tin tức & truyền thông' },
+  { id: '2214', name: 'Media/news company', group: 'Tin Tức & Truyền Thông', desc: 'Công ty tin tức / truyền thông' },
+  { id: '189689404395044', name: 'Personal blog', group: 'Blog & Sáng Tạo', desc: 'Blog cá nhân' },
+  { id: '1602034176774683', name: 'Blogger', group: 'Blog & Sáng Tạo', desc: 'Người viết blog' },
+  { id: '1001', name: 'Digital creator', group: 'Blog & Sáng Tạo', desc: 'Người sáng tạo nội dung số' },
+  { id: '1889025114674312', name: 'Video creator', group: 'Video & Giải Trí', desc: 'Người sáng tạo video' },
+  { id: '180164648685984', name: 'Entertainment website', group: 'Video & Giải Trí', desc: 'Trang web giải trí' },
+  { id: '2612', name: 'Community', group: 'Cộng Đồng', desc: 'Trang cộng đồng' },
+  { id: '1604', name: 'Public figure', group: 'Cá Nhân', desc: 'Nhân vật của công chúng' },
+  { id: '1203', name: 'Writer', group: 'Sáng Tạo', desc: 'Nhà văn / Tác giả' },
+  { id: '2604', name: 'Art', group: 'Nghệ Thuật', desc: 'Nghệ thuật & Thiết kế' },
+  { id: '2205', name: 'E-commerce website', group: 'Kinh Doanh', desc: 'Trang web thương mại điện tử' },
+  { id: '2201', name: 'Business & utility', group: 'Kinh Doanh', desc: 'Dịch vụ & Doanh nghiệp' },
+  { id: '1901', name: 'Education', group: 'Giáo Dục', desc: 'Giáo dục / Học tập' },
+  { id: 'custom', name: 'Tùy biến khác (Nhập ID thủ công)', group: 'Khác', desc: 'Tự nhập Category ID theo nhu cầu' },
+];
+
 /** Component FanpageCard chuẩn Grid Card tích hợp 3 biểu đồ xu hướng sparkline mini */
 function FanpageCard({ page, isExpired, testingPageId, handleTestPost, handleToggleActive, isSelected, onToggleSelect }: any) {
   const navigate = useNavigate();
@@ -628,6 +647,15 @@ export default function FacebookPages() {
   const [bulkAutoPublish, setBulkAutoPublish] = useState<boolean>(true);
   const [bulkBgmList, setBulkBgmList] = useState<any[]>([]);
 
+  /** State Modal Đổi Hạng Mục (Category) Hàng Loạt */
+  const [isBulkCategoryModalOpen, setIsBulkCategoryModalOpen] = useState(false);
+  const [isSubmittingBulkCategory, setIsSubmittingBulkCategory] = useState(false);
+  const [bulkCategoryId, setBulkCategoryId] = useState<string>('196739023685716');
+  const [bulkCategoryCustomName, setBulkCategoryCustomName] = useState<string>('');
+  const [bulkCategoryCustomId, setBulkCategoryCustomId] = useState<string>('');
+  const [bulkCategoryScope, setBulkCategoryScope] = useState<'selected' | 'bm'>('selected');
+  const [bulkCategoryBm, setBulkCategoryBm] = useState<string>('');
+
   const uniqueOwners = Array.from(new Set(pages.map(p => p.ownerName).filter(Boolean)));
   const uniqueBusinesses = Array.from(new Set(pages.map(p => p.businessName).filter(Boolean)));
   const uniqueTags = Array.from(new Set(pages.flatMap(p => p.tags || [])));
@@ -778,6 +806,72 @@ export default function FacebookPages() {
       ztteam_showToast(err.response?.data?.message || err.message || 'Lỗi khi áp dụng cấu hình', 'error');
     } finally {
       setIsSubmittingBulkSchedule(false);
+    }
+  };
+
+  /** Xử lý Đổi Hạng Mục (Category) Hàng Loạt Theo BM hoặc Fanpage Đã Chọn */
+  const handleBulkUpdateCategorySubmit = async () => {
+    let targetPageIds: string[] = [];
+
+    if (bulkCategoryScope === 'bm') {
+      if (!bulkCategoryBm) {
+        ztteam_showToast('Vui lòng chọn Doanh nghiệp / Business Manager (BM)', 'error');
+        return;
+      }
+      const bmPages = pages.filter(p => p.businessName === bulkCategoryBm && p.isActive !== false);
+      targetPageIds = bmPages.map(p => p.id);
+      if (targetPageIds.length === 0) {
+        ztteam_showToast(`Không tìm thấy Fanpage đang hoạt động nào trong BM "${bulkCategoryBm}"`, 'error');
+        return;
+      }
+    } else {
+      if (selectedPageIds.length === 0) {
+        ztteam_showToast('Vui lòng chọn ít nhất 1 Fanpage', 'error');
+        return;
+      }
+      targetPageIds = [...selectedPageIds];
+    }
+
+    const selectedCategoryItem = FB_POPULAR_CATEGORIES.find(c => c.id === bulkCategoryId);
+    const finalCategoryId = bulkCategoryId === 'custom' ? bulkCategoryCustomId.trim() : bulkCategoryId;
+    const finalCategoryName = bulkCategoryId === 'custom'
+      ? (bulkCategoryCustomName.trim() || `ID: ${finalCategoryId}`)
+      : (selectedCategoryItem?.name || finalCategoryId);
+
+    if (!finalCategoryId) {
+      ztteam_showToast('Vui lòng chọn hoặc nhập ID Hạng Mục Facebook hợp lệ', 'error');
+      return;
+    }
+
+    const confirm = await ztteam_showConfirm(
+      'Xác nhận đổi hạng mục hàng loạt',
+      `Hệ thống sẽ cập nhật hạng mục thành "${finalCategoryName}" (ID: ${finalCategoryId}) cho ${targetPageIds.length} Fanpage qua Meta Graph API. Bạn có chắc chắn muốn thực hiện?`
+    );
+
+    if (!confirm) return;
+
+    try {
+      setIsSubmittingBulkCategory(true);
+      const resolvedPageIds = targetPageIds.map(selId => {
+        const found = pages.find(p => p.id === selId || (p as any).internalId === selId);
+        return (found as any)?.internalId || selId;
+      });
+
+      const res = await api.post('/facebook/pages/bulk-update-category', {
+        pageIds: resolvedPageIds,
+        categoryId: finalCategoryId,
+        categoryName: finalCategoryName,
+      });
+
+      if (res.data?.success) {
+        ztteam_showToast(res.data.message || `Đã cập nhật hạng mục cho ${res.data.totalSuccess || 0} Fanpage`, 'success');
+        setIsBulkCategoryModalOpen(false);
+        await ztteam_fetchPagesFromDB();
+      }
+    } catch (err: any) {
+      ztteam_showToast(err.response?.data?.message || err.message || 'Lỗi khi cập nhật hạng mục hàng loạt', 'error');
+    } finally {
+      setIsSubmittingBulkCategory(false);
     }
   };
 
@@ -1165,6 +1259,20 @@ export default function FacebookPages() {
                 <span className="material-symbols-outlined text-sm">rss_feed</span>
                 <span>Gán Nguồn Cào</span>
               </button>
+
+              <button
+                onClick={() => {
+                  if (selectedPageIds.length === 0) {
+                    handleSelectAllCurrentTab();
+                  }
+                  setIsBulkCategoryModalOpen(true);
+                }}
+                className="px-3 py-1 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 font-bold flex items-center gap-1.5 transition-colors border border-cyan-500/40"
+                title="Thay đổi hạng mục (Category) Fanpage hàng loạt theo BM hoặc các Page đã chọn"
+              >
+                <span className="material-symbols-outlined text-sm">category</span>
+                <span>Đổi Hạng Mục</span>
+              </button>
             </div>
           </div>
 
@@ -1349,6 +1457,14 @@ export default function FacebookPages() {
             </button>
 
             <button
+              onClick={() => setIsBulkCategoryModalOpen(true)}
+              className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:opacity-90 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-cyan-500/20 active:scale-95 transition-all"
+            >
+              <span className="material-symbols-outlined text-base">category</span>
+              <span>Đổi Hạng Mục</span>
+            </button>
+
+            <button
               onClick={() => setSelectedPageIds([])}
               className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-medium flex items-center justify-center transition-colors border border-slate-700"
               title="Bỏ chọn tất cả"
@@ -1487,6 +1603,227 @@ export default function FacebookPages() {
                   <span className="material-symbols-outlined text-sm">done_all</span>
                 )}
                 <span>Xác nhận gán cho {selectedPageIds.length} Page</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/** MODAL ĐỔI HẠNG MỤC FANPAGE HÀNG LOẠT (BULK CATEGORY UPDATE) */}
+      {isBulkCategoryModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-fb-surface w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-5 border border-slate-700/60 flex flex-col max-h-[90vh] overflow-y-auto">
+            {/** Header Modal */}
+            <div className="flex items-center justify-between pb-2 border-b border-fb-surface-hover/50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center shadow-md">
+                  <span className="material-symbols-outlined text-xl">category</span>
+                </div>
+                <div>
+                  <h3 className="font-black text-lg text-fb-text">Đổi Hạng Mục Hàng Loạt</h3>
+                  <p className="text-xs text-fb-text-muted">Cập nhật trực tiếp lên Meta Facebook Graph API</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsBulkCategoryModalOpen(false)}
+                className="w-8 h-8 rounded-full hover:bg-fb-surface-hover flex items-center justify-center text-fb-text-muted hover:text-white transition-colors"
+              >
+                <span className="material-symbols-outlined text-base">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/** 1. Phạm vi áp dụng */}
+              <div>
+                <label className="block text-xs font-bold text-fb-text mb-1.5">
+                  1. Phạm Vi Áp Dụng
+                </label>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div
+                    onClick={() => setBulkCategoryScope('selected')}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                      bulkCategoryScope === 'selected'
+                        ? 'bg-cyan-500/15 border-cyan-500/50 text-white font-bold'
+                        : 'bg-slate-800/40 border-slate-700/60 text-fb-text-muted hover:border-slate-500'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="material-symbols-outlined text-sm text-cyan-400">checklist</span>
+                      <span>Theo Fanpage đã chọn</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-normal leading-tight">
+                      Áp dụng cho <b className="text-cyan-400">{selectedPageIds.length}</b> Fanpage đang được tích chọn.
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => {
+                      setBulkCategoryScope('bm');
+                      if (!bulkCategoryBm && uniqueBusinesses.length > 0) {
+                        setBulkCategoryBm(uniqueBusinesses[0]);
+                      }
+                    }}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                      bulkCategoryScope === 'bm'
+                        ? 'bg-blue-500/15 border-blue-500/50 text-white font-bold'
+                        : 'bg-slate-800/40 border-slate-700/60 text-fb-text-muted hover:border-slate-500'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="material-symbols-outlined text-sm text-blue-400">corporate_fare</span>
+                      <span>Theo Business Manager</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-normal leading-tight">
+                      Áp dụng cho toàn bộ Fanpage thuộc BM được chọn.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/** Chọn BM nếu chọn scope = 'bm' */}
+              {bulkCategoryScope === 'bm' && (
+                <div>
+                  <label className="block text-xs font-bold text-fb-text mb-1.5">
+                    Chọn Business Manager <span className="text-red-400">*</span>
+                  </label>
+                  <CustomDropdown
+                    value={bulkCategoryBm}
+                    onChange={(val) => setBulkCategoryBm(val)}
+                    options={[
+                      { value: '', label: '-- Chọn Business Manager --' },
+                      ...uniqueBusinesses.map(bm => {
+                        const count = pages.filter(p => p.businessName === bm && p.isActive !== false).length;
+                        return {
+                          value: bm,
+                          label: `${bm} (${count} Fanpage)`
+                        };
+                      })
+                    ]}
+                    className="w-full"
+                  />
+                </div>
+              )}
+
+              {/** 2. Chọn Hạng mục mới */}
+              <div>
+                <label className="block text-xs font-bold text-fb-text mb-1.5">
+                  2. Chọn Hạng Mục Mới (Category) <span className="text-red-400">*</span>
+                </label>
+                <CustomDropdown
+                  value={bulkCategoryId}
+                  onChange={(val) => setBulkCategoryId(val)}
+                  options={FB_POPULAR_CATEGORIES.map(c => ({
+                    value: c.id,
+                    label: `${c.name} — ${c.desc}`
+                  }))}
+                  className="w-full"
+                />
+              </div>
+
+              {/** Nếu chọn tùy biến khác (custom) */}
+              {bulkCategoryId === 'custom' && (
+                <div className="p-3 bg-fb-surface-hover/30 rounded-xl border border-fb-surface-hover/50 space-y-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-fb-text mb-1">
+                      ID Hạng Mục Facebook (Category ID) <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ví dụ: 196739023685716"
+                      value={bulkCategoryCustomId}
+                      onChange={(e) => setBulkCategoryCustomId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-fb-text mb-1">
+                      Tên Hạng Mục Hiển Thị (Tùy chọn)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ví dụ: News & media website"
+                      value={bulkCategoryCustomName}
+                      onChange={(e) => setBulkCategoryCustomName(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/** Danh sách tóm tắt Fanpage sẽ áp dụng */}
+              <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800 text-xs">
+                <div className="flex items-center justify-between text-slate-300 font-bold mb-1.5">
+                  <span>Danh sách áp dụng:</span>
+                  <span className="text-cyan-400">
+                    {bulkCategoryScope === 'bm'
+                      ? `${pages.filter(p => p.businessName === bulkCategoryBm && p.isActive !== false).length} Page`
+                      : `${selectedPageIds.length} Page`
+                    }
+                  </span>
+                </div>
+                <div className="max-h-24 overflow-y-auto space-y-1 pr-1 text-[11px] text-slate-400">
+                  {(bulkCategoryScope === 'bm'
+                    ? pages.filter(p => p.businessName === bulkCategoryBm && p.isActive !== false)
+                    : pages.filter(p => selectedPageIds.includes(p.id))
+                  ).slice(0, 8).map(p => (
+                    <div key={p.id} className="flex items-center justify-between py-0.5">
+                      <span className="truncate max-w-[240px] text-slate-200">{p.name}</span>
+                      <span className="text-slate-500 shrink-0 text-[10px]">{p.category || 'Chưa có'}</span>
+                    </div>
+                  ))}
+                  {(bulkCategoryScope === 'bm'
+                    ? pages.filter(p => p.businessName === bulkCategoryBm && p.isActive !== false)
+                    : pages.filter(p => selectedPageIds.includes(p.id))
+                  ).length > 8 && (
+                    <p className="text-[10px] text-slate-500 italic text-center pt-0.5">
+                      ...và thêm {(bulkCategoryScope === 'bm'
+                        ? pages.filter(p => p.businessName === bulkCategoryBm && p.isActive !== false)
+                        : pages.filter(p => selectedPageIds.includes(p.id))
+                      ).length - 8} Fanpage khác
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/** Ghi chú an toàn */}
+              <div className="p-2.5 rounded-xl bg-cyan-950/20 border border-cyan-500/20 flex items-start gap-2 text-xs text-slate-400 leading-relaxed">
+                <span className="material-symbols-outlined text-cyan-400 text-sm mt-0.5 shrink-0">info</span>
+                <span>
+                  Thao tác sẽ gọi trực tiếp Meta Graph API để cập nhật hạng mục. Quá trình được giãn cách 400ms giữa các Fanpage để tránh rate limit.
+                </span>
+              </div>
+            </div>
+
+            {/** Actions */}
+            <div className="pt-3 border-t border-fb-surface-hover/50 flex items-center justify-end gap-2.5">
+              <button
+                onClick={() => setIsBulkCategoryModalOpen(false)}
+                disabled={isSubmittingBulkCategory}
+                className="px-4 py-2 bg-fb-surface-hover hover:bg-fb-surface-hover/80 text-fb-text font-bold rounded-xl text-xs transition-colors"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                onClick={handleBulkUpdateCategorySubmit}
+                disabled={isSubmittingBulkCategory || (bulkCategoryScope === 'bm' && !bulkCategoryBm) || (bulkCategoryScope === 'selected' && selectedPageIds.length === 0)}
+                className="px-5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:opacity-90 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-cyan-500/25 transition-all disabled:opacity-50"
+              >
+                {isSubmittingBulkCategory ? (
+                  <>
+                    <span className="material-symbols-outlined animate-spin text-sm">sync</span>
+                    <span>Đang cập nhật...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-sm">check_circle</span>
+                    <span>
+                      Xác nhận đổi cho {bulkCategoryScope === 'bm'
+                        ? `${pages.filter(p => p.businessName === bulkCategoryBm && p.isActive !== false).length} Page`
+                        : `${selectedPageIds.length} Page`
+                      }
+                    </span>
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -1718,6 +2055,221 @@ export default function FacebookPages() {
                   <span className="material-symbols-outlined text-sm">done_all</span>
                 )}
                 <span>Xác nhận áp dụng cho {selectedPageIds.length} Page</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/** MODAL ĐỔI HẠNG MỤC (CATEGORY) HÀNG LOẠT */}
+      {isBulkCategoryModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-fb-surface w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-5 border border-slate-700/60 flex flex-col max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-fb-surface-hover/50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center shadow-md">
+                  <span className="material-symbols-outlined text-xl">category</span>
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-fb-text">Đổi Hạng Mục Fanpage Hàng Loạt</h3>
+                  <p className="text-xs text-fb-text-muted">Cập nhật hạng mục (Category) trực tiếp lên Meta Facebook Graph API</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsBulkCategoryModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-fb-surface-hover hover:bg-fb-surface-hover/80 flex items-center justify-center text-fb-text-muted hover:text-white transition-colors"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/** PHẠM VI ÁP DỤNG: THEO BM HOẶC PAGE ĐÃ CHỌN */}
+              <div className="bg-fb-surface-hover/20 p-4 rounded-2xl border border-fb-surface-hover/40 space-y-3">
+                <label className="block text-xs font-bold text-cyan-400 uppercase tracking-wider">
+                  1. Phạm Vi Áp Dụng
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBulkCategoryScope('selected')}
+                    className={`p-3 rounded-xl border text-left transition-all flex items-center gap-2.5 ${
+                      bulkCategoryScope === 'selected'
+                        ? 'bg-cyan-500/15 border-cyan-500/60 text-white font-bold shadow-md shadow-cyan-500/10'
+                        : 'bg-slate-800/40 border-slate-700/60 text-fb-text-muted hover:border-slate-500'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-base text-cyan-400">checklist</span>
+                    <div>
+                      <div className="text-xs font-bold text-white">Fanpage Đã Chọn</div>
+                      <div className="text-[10px] text-slate-400">({selectedPageIds.length} Page)</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkCategoryScope('bm');
+                      if (!bulkCategoryBm && uniqueBusinesses.length > 0) {
+                        setBulkCategoryBm(uniqueBusinesses[0] as string);
+                      }
+                    }}
+                    className={`p-3 rounded-xl border text-left transition-all flex items-center gap-2.5 ${
+                      bulkCategoryScope === 'bm'
+                        ? 'bg-cyan-500/15 border-cyan-500/60 text-white font-bold shadow-md shadow-cyan-500/10'
+                        : 'bg-slate-800/40 border-slate-700/60 text-fb-text-muted hover:border-slate-500'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-base text-blue-400">corporate_fare</span>
+                    <div>
+                      <div className="text-xs font-bold text-white">Theo Doanh Nghiệp (BM)</div>
+                      <div className="text-[10px] text-slate-400">Toàn bộ Page trong BM</div>
+                    </div>
+                  </button>
+                </div>
+
+                {bulkCategoryScope === 'bm' && (
+                  <div className="pt-2 animate-in fade-in duration-200">
+                    <label className="block text-xs font-bold text-fb-text mb-1.5">
+                      Chọn Business Manager (BM):
+                    </label>
+                    <CustomDropdown
+                      value={bulkCategoryBm}
+                      onChange={(val) => setBulkCategoryBm(val)}
+                      options={uniqueBusinesses.map(b => {
+                        const count = pages.filter(p => p.businessName === b && p.isActive !== false).length;
+                        return {
+                          value: b as string,
+                          label: `🏢 ${b} (${count} Fanpage đang hoạt động)`
+                        };
+                      })}
+                      className="w-full"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/** CHỌN HẠNG MỤC MỚI */}
+              <div className="bg-fb-surface-hover/20 p-4 rounded-2xl border border-fb-surface-hover/40 space-y-3">
+                <label className="block text-xs font-bold text-cyan-400 uppercase tracking-wider">
+                  2. Chọn Hạng Mục Muốn Đổi
+                </label>
+                <div>
+                  <CustomDropdown
+                    value={bulkCategoryId}
+                    onChange={(val) => setBulkCategoryId(val)}
+                    options={FB_POPULAR_CATEGORIES.map(cat => ({
+                      value: cat.id,
+                      label: `${cat.name} — [${cat.desc}]`
+                    }))}
+                    className="w-full"
+                  />
+                </div>
+
+                {bulkCategoryId === 'custom' && (
+                  <div className="space-y-2.5 pt-2 animate-in fade-in duration-200">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Facebook Category ID (Bắt buộc):
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ví dụ: 196739023685716 hoặc 2214"
+                        value={bulkCategoryCustomId}
+                        onChange={(e) => setBulkCategoryCustomId(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Tên Hạng Mục Hiển Thị:
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ví dụ: Tin Tức & Truyền Thông"
+                        value={bulkCategoryCustomName}
+                        onChange={(e) => setBulkCategoryCustomName(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/** PREVIEW DANH SÁCH PAGE SẼ ĐƯỢC CẬP NHẬT */}
+              <div className="border border-slate-700/60 rounded-2xl overflow-hidden">
+                <div className="p-2.5 bg-slate-800/60 font-bold text-slate-300 text-[11px] border-b border-slate-700/60 flex items-center justify-between">
+                  <span>Xem trước Fanpage sẽ cập nhật:</span>
+                  <span className="text-[10px] text-cyan-400 font-mono">
+                    {(() => {
+                      const targetPages = bulkCategoryScope === 'bm'
+                        ? pages.filter(p => p.businessName === bulkCategoryBm && p.isActive !== false)
+                        : pages.filter(p => selectedPageIds.includes(p.id));
+                      return `${targetPages.length} Fanpage`;
+                    })()}
+                  </span>
+                </div>
+                <div className="divide-y divide-slate-800/70 text-[11px] max-h-36 overflow-y-auto">
+                  {(() => {
+                    const targetPages = bulkCategoryScope === 'bm'
+                      ? pages.filter(p => p.businessName === bulkCategoryBm && p.isActive !== false)
+                      : pages.filter(p => selectedPageIds.includes(p.id));
+
+                    if (targetPages.length === 0) {
+                      return (
+                        <div className="p-3 text-center text-slate-400 text-xs">
+                          Chưa có Fanpage nào được chọn
+                        </div>
+                      );
+                    }
+
+                    return targetPages.slice(0, 6).map(p => (
+                      <div key={p.id} className="p-2 bg-slate-900/40 flex items-center justify-between gap-2">
+                        <span className="font-bold text-white truncate max-w-[220px]">
+                          {p.name}
+                        </span>
+                        <span className="text-[10px] text-slate-400 truncate font-mono">
+                          Hạng mục cũ: <span className="text-amber-300">{p.category || 'Chưa có'}</span>
+                        </span>
+                      </div>
+                    ));
+                  })()}
+                  {(() => {
+                    const targetPages = bulkCategoryScope === 'bm'
+                      ? pages.filter(p => p.businessName === bulkCategoryBm && p.isActive !== false)
+                      : pages.filter(p => selectedPageIds.includes(p.id));
+                    if (targetPages.length > 6) {
+                      return (
+                        <div className="p-2 bg-slate-900/20 text-center text-slate-400 text-[10px] italic">
+                          ...và {targetPages.length - 6} Fanpage còn lại.
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-fb-surface-hover/50 flex items-center justify-end gap-2.5">
+              <button
+                onClick={() => setIsBulkCategoryModalOpen(false)}
+                disabled={isSubmittingBulkCategory}
+                className="px-4 py-2 bg-fb-surface-hover hover:bg-fb-surface-hover/80 text-fb-text font-bold rounded-xl text-xs transition-colors"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                onClick={handleBulkUpdateCategorySubmit}
+                disabled={isSubmittingBulkCategory}
+                className="px-5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:opacity-90 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-cyan-500/25 transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {isSubmittingBulkCategory ? (
+                  <span className="material-symbols-outlined animate-spin text-sm">sync</span>
+                ) : (
+                  <span className="material-symbols-outlined text-sm">check_circle</span>
+                )}
+                <span>Xác nhận cập nhật hạng mục</span>
               </button>
             </div>
           </div>

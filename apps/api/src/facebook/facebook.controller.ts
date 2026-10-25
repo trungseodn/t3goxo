@@ -1,4 +1,7 @@
-import { Body, Controller, Post, Get, Param, UseGuards, Request, Put, Delete } from '@nestjs/common';
+import { Body, Controller, Post, Get, Param, UseGuards, Request, Put, Delete, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import * as os from 'os';
 import { ZTTeamFacebookService } from './facebook.service';
 import { ZTTeamAuthGuard } from '../auth/auth.guard';
 
@@ -167,4 +170,34 @@ export class ZTTeamFacebookController {
   ) {
     return this.facebookService.ztteam_applyPageBranding(pageId, body);
   }
+
+  @Post('pages/bulk-update-category')
+  ztteam_bulkUpdateCategory(
+    @Body()
+    body: {
+      pageIds: string[];
+      categoryId: string;
+      categoryName: string;
+    }
+  ) {
+    return this.facebookService.ztteam_bulkUpdateCategory(body);
+  }
+
+  @Post('pages/:pageId/branding/upload')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: os.tmpdir(),
+      }),
+      limits: { fileSize: 15 * 1024 * 1024 },
+    })
+  )
+  ztteam_uploadBrandingAsset(
+    @Param('pageId') pageId: string,
+    @UploadedFile() file: any,
+    @Body('type') type: 'avatar' | 'cover',
+  ) {
+    return this.facebookService.ztteam_uploadBrandingAsset(pageId, file, type);
+  }
 }
+
