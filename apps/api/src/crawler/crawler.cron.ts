@@ -13,6 +13,8 @@ export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
   private readonly logger = new Logger(ZTTeamCrawlerCron.name);
   private rssParser: Parser;
   private isRunning = false;
+  private lastStartedAt = 0;
+  private readonly MAX_CRAWL_LOCK_DURATION_MS = 15 * 60 * 1000; /** 15 phút tối đa */
 
   constructor(
     private readonly prisma: PrismaService,
@@ -44,10 +46,22 @@ export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
       return;
     }
     if (this.isRunning) {
-      this.logger.warn('Crawler cron is already running, skipping this tick');
-      return;
+      const runningDuration = Date.now() - this.lastStartedAt;
+      if (runningDuration > this.MAX_CRAWL_LOCK_DURATION_MS) {
+        this.logger.error(`[WATCHDOG RECOVERY] Auto-Crawler Cron has been running for ${Math.round(runningDuration / 60000)} mins (limit exceeded). Force releasing lock to resume automated operations.`);
+        this.isRunning = false;
+        this.telegramService.ztteam_sendMessage(
+          `🚨 <b>[AUTO-CRAWLER WATCHDOG RESET]</b>\n` +
+          `Hệ thống phát hiện tiến trình cào bài bị kẹt lock quá 15 phút (có khả năng do server nguồn giữ socket treo).\n` +
+          `Watchdog đã tự động giải phóng lock an toàn để khôi phục cào bài tự động.`
+        ).catch(() => {});
+      } else {
+        this.logger.warn(`Crawler cron is already running (${Math.round(runningDuration / 1000)}s), skipping this tick`);
+        return;
+      }
     }
     this.isRunning = true;
+    this.lastStartedAt = Date.now();
     this.logger.log('Starting Auto-Crawler Cron...');
 
     try {
@@ -93,7 +107,13 @@ export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
         this.logger.log(`Crawling source: ${source.source_url} for site: ${source.target_site.wp_url}`);
         
         try {
-          await this.ztteam_crawlSource(source);
+          const SOURCE_TIMEOUT_MS = 5 * 60 * 1000; /** 5 phút tối đa cho mỗi nguồn */
+          await Promise.race([
+            this.ztteam_crawlSource(source),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Timeout 5 phút khi cào nguồn: ${source.source_url}`)), SOURCE_TIMEOUT_MS)
+            )
+          ]);
         } catch (error: any) {
           this.logger.error(`Failed to crawl source ${source.id}: ${error.message}`);
         }
@@ -233,7 +253,19 @@ export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
       const pageUrl = this.ztteam_generatePageUrl(source.source_url, p);
       this.logger.log(`[Trang ${p}] Đang quét link bài viết từ nguồn: ${pageUrl}`);
 
-      const pageArticles = await this.ztteam_extractArticleLinksFromPage(pageUrl, source, p);
+      let pageArticles: string[] = [];
+      try {
+        const PAGE_TIMEOUT_MS = 60 * 1000; /** 60s max per page link extraction */
+        pageArticles = await Promise.race([
+          this.ztteam_extractArticleLinksFromPage(pageUrl, source, p),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout 60s khi quét link từ ${pageUrl}`)), PAGE_TIMEOUT_MS)
+          )
+        ]);
+      } catch (pageErr: any) {
+        this.logger.warn(`[Trang ${p}] Quét link bài viết thất bại hoặc timeout: ${pageErr.message}`);
+        pageArticles = [];
+      }
 
       /** Nếu trang không có bài viết nào (404 hoặc đã hết các trang phân trang), dừng quét */
       if (pageArticles.length === 0) {
@@ -330,13 +362,19 @@ export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
           }
         } catch (e) {}
 
-        const result = await this.crawlerService.ztteam_crawlAndPublishStory({
-          sourceId: source.id,
-          sourceUrl: url,
-          targetSiteId: source.target_site_id,
-          sourceCategory: source.source_category,
-          keepContentImages,
-        });
+        const ARTICLE_TIMEOUT_MS = 3 * 60 * 1000; /** 3 phút tối đa cho một bài viết */
+        const result = await Promise.race([
+          this.crawlerService.ztteam_crawlAndPublishStory({
+            sourceId: source.id,
+            sourceUrl: url,
+            targetSiteId: source.target_site_id,
+            sourceCategory: source.source_category,
+            keepContentImages,
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout 3 phút khi xử lý bài viết: ${url}`)), ARTICLE_TIMEOUT_MS)
+          )
+        ]);
 
         await this.prisma.ztteam_crawl_history.upsert({
           where: { source_id_url: { source_id: source.id, url } },

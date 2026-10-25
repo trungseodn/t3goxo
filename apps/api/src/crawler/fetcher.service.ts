@@ -23,9 +23,11 @@ export class ZTTeamFetcherService {
   private readonly logger = new Logger(ZTTeamFetcherService.name);
 
   async ztteam_fetchHtml(url: string): Promise<string> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000); /** 20s hard timeout covering both request & body stream */
     try {
       const response = await fetch(url, {
-        signal: AbortSignal.timeout(15000), /** 15 seconds timeout */
+        signal: controller.signal,
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -47,10 +49,12 @@ export class ZTTeamFetcherService {
         throw new Error(`HTTP Error: ${response.status}`);
       }
 
-      return response.text();
+      return await response.text();
     } catch (error: any) {
       this.logger.error(`Failed to fetch HTML from ${url}`, error.stack);
       throw new HttpException(`Cannot fetch URL: ${error.message}`, HttpStatus.BAD_REQUEST);
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -335,19 +339,26 @@ export class ZTTeamFetcherService {
    */
   async ztteam_fetchViaBypassProxy(url: string): Promise<ZTTeamFetchResult> {
     this.logger.log(`Attempting bypass proxy fetch for geo-blocked/protected URL: ${url}`);
-    const proxyUrl = `https://r.jina.ai/${url}`;
-    const response = await fetch(proxyUrl, {
-      signal: AbortSignal.timeout(25000),
-      headers: {
-        Accept: 'application/json',
-      },
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000); /** 25s hard timeout covering body stream */
+    let rawBody = '';
+    try {
+      const proxyUrl = `https://r.jina.ai/${url}`;
+      const response = await fetch(proxyUrl, {
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+        },
+      });
 
-    if (!response.ok) {
-      throw new Error(`Proxy bypass failed with status: ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`Proxy bypass failed with status: ${response.status}`);
+      }
+
+      rawBody = await response.text();
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const rawBody = await response.text();
     let text = rawBody;
     let title = '';
     let featuredImage: string | null = null;
@@ -784,10 +795,12 @@ export class ZTTeamFetcherService {
    */
   async ztteam_extractArticleLinksViaProxy(categoryUrl: string): Promise<string[]> {
     this.logger.log(`Extracting article links via bypass proxy for category: ${categoryUrl}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000); /** 25s hard timeout */
     try {
       const proxyUrl = `https://r.jina.ai/${categoryUrl}`;
       const response = await fetch(proxyUrl, {
-        signal: AbortSignal.timeout(25000),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -818,6 +831,8 @@ export class ZTTeamFetcherService {
     } catch (e: any) {
       this.logger.error(`Failed to extract article links via proxy: ${e.message}`);
       return [];
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -848,41 +863,52 @@ export class ZTTeamFetcherService {
 
       this.logger.log(`Downloading source original image for "${storyTitle}": ${imageUrl}`);
 
-      let response = await fetch(imageUrl, {
-        signal: AbortSignal.timeout(20000),
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        },
-      });
-
-      if (!response.ok) {
-        this.logger.warn(`Direct image download returned status ${response.status}. Retrying via proxy wsrv.nl...`);
-        const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(imageUrl)}`;
-        response = await fetch(proxyUrl, {
-          signal: AbortSignal.timeout(25000),
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      let response: Response;
+      try {
+        response = await fetch(imageUrl, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          },
         });
+
+        if (!response.ok) {
+          this.logger.warn(`Direct image download returned status ${response.status}. Retrying via proxy wsrv.nl...`);
+          const proxyUrl = `https://wsrv.nl/?url=${encodeURIComponent(imageUrl)}`;
+          response = await fetch(proxyUrl, {
+            signal: controller.signal,
+          });
+        }
+
+        if (!response.ok) {
+          throw new Error(`HTTP error ${response.status} when downloading image`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        clearTimeout(timeoutId);
+
+        if (buffer.length < 1000) {
+          throw new Error('Downloaded image file is too small or corrupted (< 1KB)');
+        }
+
+        fs.writeFileSync(localPath, buffer);
+
+        const storageUrl = `/storage/images/source-originals/${filename}`;
+        this.logger.log(`Successfully saved source original image: ${storageUrl} (${(buffer.length / 1024).toFixed(1)} KB)`);
+
+        return {
+          localPath,
+          storageUrl,
+        };
+      } catch (e: any) {
+        clearTimeout(timeoutId);
+        throw e;
       }
-
-      if (!response.ok) {
-        throw new Error(`HTTP error ${response.status} when downloading image`);
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      if (buffer.length < 1000) {
-        throw new Error('Downloaded image file is too small or corrupted (< 1KB)');
-      }
-
-      fs.writeFileSync(localPath, buffer);
-
-      const storageUrl = `/storage/images/source-originals/${filename}`;
-      this.logger.log(`Successfully saved source original image: ${storageUrl} (${(buffer.length / 1024).toFixed(1)} KB)`);
-
-      return {
-        localPath,
         storageUrl,
       };
     } catch (err: any) {
