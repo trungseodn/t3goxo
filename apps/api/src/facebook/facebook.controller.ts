@@ -1,7 +1,7 @@
 import { Body, Controller, Post, Get, Param, UseGuards, Request, Put, Delete, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
 import * as os from 'os';
+const { diskStorage } = require('multer');
 import { ZTTeamFacebookService } from './facebook.service';
 import { ZTTeamAuthGuard } from '../auth/auth.guard';
 

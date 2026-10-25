@@ -909,8 +909,6 @@ export class ZTTeamFetcherService {
         clearTimeout(timeoutId);
         throw e;
       }
-        storageUrl,
-      };
     } catch (err: any) {
       this.logger.error(`Failed to download and save source original image from ${imageUrl}: ${err.message}`);
       throw err;
