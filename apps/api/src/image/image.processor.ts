@@ -98,8 +98,8 @@ export class ZTTeamImageProcessor implements OnModuleInit {
     fs.mkdirSync(workDir, { recursive: true });
 
     try {
-      /** ========== 100% SangTao.ai 2K Pipeline ========== */
-      await this.ztteam_processSangTao2kJob(imageId, pageId, wpPostId);
+      /** ========== Xử lý ảnh bài viết từ ảnh gốc nguồn ========== */
+      await this.ztteam_processSourceOriginalJob(imageId, pageId, wpPostId);
       return;
     } catch (error: any) {
       this.logger.error(`Image render failed for ${imageId}: ${error.message}`);
@@ -202,11 +202,10 @@ export class ZTTeamImageProcessor implements OnModuleInit {
   }
 
   /**
-   * Render or Re-render 2K Image using SangTao.ai with modern 2026 prompt
-   * Deletes old local image and old WordPress media, uploads new 2K image, and updates featured_media
+   * Process Image using source original image
    */
-  private async ztteam_processSangTao2kJob(imageId: string, pageId: string, wpPostId: string): Promise<void> {
-    this.logger.log(`Executing SangTao.ai 2K render for image ${imageId}`);
+  private async ztteam_processSourceOriginalJob(imageId: string, pageId: string, wpPostId: string): Promise<void> {
+    this.logger.log(`Processing image for ${imageId} using source original`);
     const image = await this.prisma.ztteam_images.findUnique({
       where: { id: imageId },
       include: { page: true },
@@ -214,180 +213,26 @@ export class ZTTeamImageProcessor implements OnModuleInit {
     if (!image) throw new Error('Image record not found');
 
     const workDir = path.join(this.storageRoot, imageId);
-    if (fs.existsSync(workDir)) {
-      try {
-        const files = fs.readdirSync(workDir);
-        for (const file of files) {
-          try { fs.unlinkSync(path.join(workDir, file)); } catch (e) {}
-        }
-      } catch (e) {}
-    } else {
+    if (!fs.existsSync(workDir)) {
       fs.mkdirSync(workDir, { recursive: true });
     }
 
-    let storyContent = image.wp_post_title || '';
-    if (image.ai_caption) {
-      storyContent += '\n\n' + image.ai_caption;
-    }
-
-    let wpSite: any = null;
-    let wpPostData: any = null;
-    let authHeader: string | null = null;
-    let wpUrl: string | null = null;
-
-    /** Try fetching full story content and post metadata from WordPress */
-    if (wpPostId) {
-      try {
-        const effectivePageId = pageId || image.page_id;
-        const page = effectivePageId
-          ? await this.prisma.ztteam_pages.findUnique({
-              where: { id: effectivePageId },
-              include: { sources: true },
-            })
-          : null;
-        const source = page?.sources?.[0];
-        if (source?.target_site_id) {
-          wpSite = await this.prisma.ztteam_target_sites.findUnique({
-            where: { id: source.target_site_id },
-          });
-          if (wpSite) {
-            authHeader = this.wordpressService.ztteam_getAuthHeader(wpSite);
-            wpUrl = wpSite.wp_url.replace(/\/$/, '');
-            const res = await axios.get(`${wpUrl}/wp-json/wp/v2/posts/${wpPostId}`, {
-              headers: { Authorization: authHeader },
-              timeout: 15000,
-            });
-            wpPostData = res.data;
-            if (wpPostData?.content?.rendered) {
-              const cleanText = wpPostData.content.rendered.replace(/<[^>]+>/g, ' ').trim();
-              storyContent = (wpPostData.title?.rendered || image.wp_post_title || '') + '\n\n' + cleanText;
-            }
-          }
-        }
-      } catch (err: any) {
-        this.logger.warn(`Could not fetch full post from WP: ${err.message}, using fallback text`);
-      }
-    }
-
-    /** If WordPress post has old featured_media, delete it from WordPress media library */
-    if (wpPostData?.featured_media && wpUrl && authHeader) {
-      try {
-        this.logger.log(`Deleting old featured_media #${wpPostData.featured_media} on WordPress...`);
-        await this.wordpressService.ztteam_deleteMedia(wpUrl, authHeader, wpPostData.featured_media);
-      } catch (delErr: any) {
-        this.logger.warn(`Failed to delete old media on WP: ${delErr.message}`);
-      }
-    }
-
-    /** 1. Generate modern 2026 realistic prompt bám sát kịch bản */
-    const promptData = await this.storyTestService.ztteam_generateStoryImagePrompt(
-      storyContent,
-      'cinematic',
-      '4:5',
-    );
-
-    /** 2. Render 2K Image via SangTao.ai */
-    const imageResult = await this.storyTestService.ztteam_renderStoryImage({
-      prompt: promptData.image_prompt_en,
-      aspectRatio: '4:5',
-    });
-
-    /** 3. Copy image to local work directory */
     const localDestPath = path.join(workDir, 'output.png');
-    if (imageResult.localPath && fs.existsSync(imageResult.localPath)) {
+    const sourceCandidate = path.join(ztteam_getSourceOriginalsPath(), `${image.wp_post_id}.jpg`);
+    if (fs.existsSync(sourceCandidate) && !fs.existsSync(localDestPath)) {
       try {
-        fs.copyFileSync(imageResult.localPath, localDestPath);
-      } catch (cpErr: any) {
-        this.logger.warn(`Failed to copy local image: ${cpErr.message}`);
-      }
+        fs.copyFileSync(sourceCandidate, localDestPath);
+      } catch (e) {}
     }
 
-    /** 4. Upload newly rendered 2K image to WordPress & update post featured_media */
-    let uploadedMediaUrl: string | null = null;
-    if (wpUrl && authHeader && wpPostId) {
-      try {
-        this.logger.log(`Uploading new 2K image to WordPress for post #${wpPostId}...`);
-        let imgBuffer: Buffer;
-        if (imageResult.localPath && fs.existsSync(imageResult.localPath)) {
-          imgBuffer = fs.readFileSync(imageResult.localPath);
-        } else {
-          const dl = await axios.get(imageResult.imageUrl, { responseType: 'arraybuffer' });
-          imgBuffer = Buffer.from(dl.data);
-        }
-        const filename = `story_2k_${imageId}_${Date.now()}.jpg`;
-        const uploadedMedia = await this.wordpressService.ztteam_uploadMedia(
-          wpUrl,
-          authHeader,
-          imgBuffer,
-          filename,
-          'image/jpeg',
-        );
-        uploadedMediaUrl = uploadedMedia.source_url;
-        this.logger.log(`Uploaded media #${uploadedMedia.id} (${uploadedMedia.source_url})`);
-
-        await this.wordpressService.ztteam_updatePostFeaturedMedia(
-          wpUrl,
-          authHeader,
-          wpPostId,
-          uploadedMedia.id,
-        );
-      } catch (wpErr: any) {
-        this.logger.error(`Failed to upload media or update featured_media on WP: ${wpErr.message}`);
-      }
-    }
-
-    /** 5. Update database record */
     const localUrl = `/storage/images/${imageId}/output.png`;
-
-    /** ZTTeam: Kiểm tra xem bài viết đã có Caption và Comment chuẩn hay chưa */
-    const isCurrentCaptionValid = Boolean(
-      image.ai_caption &&
-      !image.ai_caption.includes('Stay tuned for the full story') &&
-      !image.ai_caption.includes('What happens next will change everything')
-    );
-
-    const isCurrentCommentValid = Boolean(
-      image.ai_first_comment &&
-      !image.ai_first_comment.includes('yourwebsite.com')
-    );
-
-    let finalCaption = image.ai_caption;
-    let finalComment = image.ai_first_comment;
-
-    /** ZTTeam: Nếu caption hoặc comment chưa chuẩn, tự động trích xuất định dạng Facebook Viral từ WordPress */
-    if (!isCurrentCaptionValid || !isCurrentCommentValid) {
-      const storyTitle = wpPostData?.title?.rendered || image.wp_post_title || '';
-      const titleUppercase = storyTitle.toUpperCase();
-      let rawContent = '';
-      if (wpPostData?.content?.rendered) {
-        rawContent = wpPostData.content.rendered.replace(/<[^>]+>/g, ' ').trim();
-      } else {
-        rawContent = storyContent;
-      }
-
-      const { part1, part2 } = this.ztteam_extractStoryParts(rawContent, 900, 700);
-      const postUrl = wpPostData?.link || image.wp_post_url || '';
-
-      if (!isCurrentCaptionValid) {
-        const captionCTA = ZTTEAM_NEWS_CAPTION_CTA;
-        finalCaption = part1 ? `${titleUppercase}\n\n${part1}\n\n${captionCTA}` : `${titleUppercase}\n\n${captionCTA}`;
-      }
-
-      if (!isCurrentCommentValid) {
-        finalComment = ztteam_getNewsComment(postUrl);
-      }
-    }
-
     await this.ztteam_updateImage(imageId, {
       status: 'COMPLETED',
       image_url: localUrl,
-      template_id: 'sangtao_2k',
-      ai_caption: finalCaption,
-      ai_first_comment: finalComment,
+      template_id: 'source_original',
       error_log: null,
     });
-
-    this.logger.log(`===== SANGTAO 2K RENDER COMPLETE: image=${imageId}, local=${localUrl}, wp=${uploadedMediaUrl || 'N/A'} =====`);
+    this.logger.log(`===== IMAGE RENDER COMPLETE: image=${imageId}, local=${localUrl} =====`);
   }
 
   /**
