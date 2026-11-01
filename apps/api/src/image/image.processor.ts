@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import axios from 'axios';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { ztteam_getImagesPath } from '../common/ztteam_storage.util';
+import { ztteam_getImagesPath, ztteam_getSourceOriginalsPath } from '../common/ztteam_storage.util';
 import { TelegramService } from '../telegram/telegram.service';
 import { ZTTeamWordpressService } from '../wordpress/wordpress.service';
 import { ztteam_getNewsComment, ZTTEAM_NEWS_CAPTION_CTA } from '../common/ztteam_news_comment.util';
