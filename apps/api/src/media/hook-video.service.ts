@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import { exec } from 'child_process';
 import puppeteer from 'puppeteer';
 import axios from 'axios';
+import sharp from 'sharp';
 
 /**
  * Danh sách 24 bộ màu Dark Seamless sang trọng, cao cấp cho Video Reel
@@ -1005,12 +1006,24 @@ export class ZTTeamHookVideoService {
         fs.mkdirSync(videosDir, { recursive: true });
       }
 
+      /** Chuẩn hóa ảnh nguồn sang PNG chuẩn bằng Sharp để đảm bảo FFmpeg -loop 1 không lỗi với AVIF/WebP */
+      let preparedSourcePath = sourceImagePath;
+      if (sourceImagePath) {
+        try {
+          const normalizedSourcePath = path.join(tempDir, 'normalized_source.png');
+          await sharp(sourceImagePath).png().toFile(normalizedSourcePath);
+          preparedSourcePath = normalizedSourcePath;
+        } catch (normErr: any) {
+          this.logger.warn(`Không thể chuyển đổi ảnh nguồn sang PNG chuẩn bằng Sharp, sử dụng file gốc: ${normErr?.message}`);
+        }
+      }
+
       const timestamp = Date.now();
       const outputFilename = `hook_reel_${imageId}_${timestamp}.mp4`;
       const outputVideoPath = path.join(videosDir, outputFilename);
       const duration = 10;
 
-      const ffmpegCmd = `nice -n 15 ffmpeg -threads 2 -y -loop 1 -t ${duration} -i "${sourceImagePath}" -loop 1 -t ${duration} -i "${overlayPngPath}" -t ${duration} -i "${audioPath}" -filter_complex "[0:v]scale=1080:774:force_original_aspect_ratio=increase,crop=1080:774:(in_w-1080)/2:(in_h-774)/2,scale='1080*(1+0.035*t/${duration})':-1:eval=frame:flags=bicubic,crop=1080:774:(in_w-1080)/2:(in_h-774)/2[fg];color=c=#011114:s=1080x1920:d=${duration}[base];[base][fg]overlay=0:0[with_img];[with_img][1:v]overlay=0:0[vout];[2:a]atrim=0:${duration},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.4,afade=t=out:st=${duration - 1.5}:d=1.5,volume=0.9[aout]" -map "[vout]" -map "[aout]" -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -r 30 -b:v 8M -maxrate 12M -bufsize 16M -c:a aac -b:a 192k -t ${duration} "${outputVideoPath}"`;
+      const ffmpegCmd = `nice -n 15 ffmpeg -threads 2 -y -loop 1 -t ${duration} -i "${preparedSourcePath}" -loop 1 -t ${duration} -i "${overlayPngPath}" -t ${duration} -i "${audioPath}" -filter_complex "[0:v]scale=1080:774:force_original_aspect_ratio=increase,crop=1080:774:(in_w-1080)/2:(in_h-774)/2,scale='1080*(1+0.035*t/${duration})':-1:eval=frame:flags=bicubic,crop=1080:774:(in_w-1080)/2:(in_h-774)/2[fg];color=c=#011114:s=1080x1920:d=${duration}[base];[base][fg]overlay=0:0[with_img];[with_img][1:v]overlay=0:0[vout];[2:a]atrim=0:${duration},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.4,afade=t=out:st=${duration - 1.5}:d=1.5,volume=0.9[aout]" -map "[vout]" -map "[aout]" -c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -r 30 -b:v 8M -maxrate 12M -bufsize 16M -c:a aac -b:a 192k -t ${duration} "${outputVideoPath}"`;
 
       await new Promise<void>((resolve, reject) => {
         exec(ffmpegCmd, { maxBuffer: 1024 * 1024 * 30 }, (error, stdout, stderr) => {
