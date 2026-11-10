@@ -138,6 +138,16 @@ export class ZTTeamRenderCron implements OnApplicationBootstrap {
       if (processedCount >= batchSize) break;
 
       try {
+        const targetSite = await this.prisma.ztteam_target_sites.findUnique({
+          where: { id: source.target_site_id },
+          select: { wp_url: true }
+        });
+        const isNewsSite = targetSite?.wp_url && (
+          targetSite.wp_url.includes('imsb.info') || 
+          targetSite.wp_url.includes('mv.imsb.info')
+        );
+        const effectiveMaxAgeDays = isNewsSite ? Math.min(maxAgeDays, 5) : maxAgeDays;
+
         /** Get latest posts from the target site */
         /** Using owner_user_id from page to authenticate with WP */
         const posts = await this.wordpressService.ztteam_getPosts(source.target_site_id, page.owner_user_id, source.target_category_id, source.target_tags);
@@ -152,7 +162,7 @@ export class ZTTeamRenderCron implements OnApplicationBootstrap {
           const postDate = new Date(post.date);
           const diffTime = Math.abs(now.getTime() - postDate.getTime());
           const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-          if (diffDays > maxAgeDays) {
+          if (diffDays > effectiveMaxAgeDays) {
             continue; /** Too old */
           }
 

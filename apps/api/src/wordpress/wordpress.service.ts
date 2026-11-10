@@ -511,6 +511,11 @@ export class ZTTeamWordpressService {
       if (categoryId) params.categories = categoryId;
       if (targetTags) params.tags = targetTags;
 
+      // ZTTeam: Website tin tức (imsb.info, mv.imsb.info) chỉ lấy bài viết mới nhất trong vòng 5 ngày
+      if (wpUrl.includes('imsb.info') || wpUrl.includes('mv.imsb.info')) {
+        params.after = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+      }
+
       const response = await firstValueFrom(
         this.httpService.get(`${wpUrl}/wp-json/wp/v2/posts`, {
           headers: { Authorization: authHeader },

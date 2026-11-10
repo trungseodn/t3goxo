@@ -84,6 +84,25 @@ export class ZTTeamCrawlerService {
       throw new HttpException(`Nội dung không đạt tiêu chuẩn bài viết (${validation.reason})`, HttpStatus.BAD_REQUEST);
     }
 
+    /** ZTTeam: Kiểm duyệt giới hạn 5 ngày đối với website tin tức (imsb.info, mv.imsb.info) */
+    const targetSiteObj = await this.prisma.ztteam_target_sites.findUnique({
+      where: { id: targetSiteId },
+      select: { wp_url: true }
+    });
+    const isNewsSite = targetSiteObj?.wp_url && (
+      targetSiteObj.wp_url.includes('imsb.info') || 
+      targetSiteObj.wp_url.includes('mv.imsb.info')
+    );
+
+    if (isNewsSite && storyData.publishedDate) {
+      const postAgeMs = Date.now() - new Date(storyData.publishedDate).getTime();
+      const postAgeDays = postAgeMs / (1000 * 60 * 60 * 24);
+      if (postAgeDays > 5) {
+        this.logger.warn(`[NEWS GATEKEEPER] Bỏ qua bài viết cũ hơn 5 ngày (${postAgeDays.toFixed(1)} ngày từ ${new Date(storyData.publishedDate).toISOString()}): ${sourceUrl}`);
+        throw new HttpException(`Bài viết quá cũ (> 5 ngày) đối với website tin tức`, HttpStatus.BAD_REQUEST);
+      }
+    }
+
     /** 1.1 Tải và lưu trữ ảnh gốc từ website nguồn vào ổ cứng VPS làm bản dự phòng an toàn */
     let sourceBackupImageUrl: string | null = null;
     let sourceBackupLocalPath: string | null = null;

@@ -524,18 +524,32 @@ export class ZTTeamPublisherCron {
           if (u) ownerEmail = u.email;
         }
 
-        const alertMsg = this.telegramService.ztteam_formatAlert({
-          systemName: isIdentityCheckpoint ? 'Xác Minh Danh Tính Fanpage' : 'Xuất Bản Fanpage (Đăng Video Reel)',
-          fanpageName: page.name || 'Không rõ',
-          postTitle: reel.wp_post_title || 'Video Reel',
-          step: 'Đăng tải video Reel lên Facebook qua Graph API',
-          rawError: extractedError,
-          nextAction: isIdentityCheckpoint
-            ? 'Hệ thống đã tự động tạm ngắt xuất bản trên Page này để bảo vệ BM. Vui lòng mở ứng dụng Facebook trên điện thoại -> Chuyển sang Page -> Đăng thử 1 bài viết để xác nhận danh tính, sau đó bật lại tự động đăng trên web.'
-            : 'Đã thử lại 3 lần thất bại. Vui lòng kiểm tra lại token Fanpage hoặc quyền đăng bài.',
-          memberEmail: ownerEmail,
-        });
-        this.telegramService.ztteam_sendMessage(alertMsg).catch(() => {});
+        if (isIdentityCheckpoint) {
+          const checkpointAlert =
+            `🚨 <b>[CẢNH BÁO: FANPAGE CẦN XÁC MINH DANH TÍNH]</b>\n\n` +
+            `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
+            `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
+            `📄 <b>Bài viết:</b> ${reel.wp_post_title || 'Video Reel'}\n` +
+            `❌ <b>Lỗi Facebook:</b> Yêu cầu Quản trị viên mở điện thoại xác minh danh tính (Code 368 / Subcode 4854002)\n` +
+            `🛡️ <b>Hành động hệ thống:</b> ĐÃ TỰ ĐỘNG TẠM DỪNG ĐĂNG BÀI trên Page này để bảo vệ BM và các Page khác.\n\n` +
+            `👉 <b>HƯỚNG DẪN MỞ KHÓA NGAY:</b>\n` +
+            `1. Mở ứng dụng Facebook trên điện thoại của Admin\n` +
+            `2. Chuyển sang Trang <b>${page.name}</b>\n` +
+            `3. Đăng thử 1 bài viết bất kỳ và làm theo thông báo xác nhận danh tính của Facebook trên điện thoại\n` +
+            `4. Sau khi đăng được, vào Cài đặt Page trên web và bật lại nút tự động đăng.`;
+          this.telegramService.ztteam_sendMessage(checkpointAlert).catch(() => {});
+        } else {
+          const alertMsg = this.telegramService.ztteam_formatAlert({
+            systemName: 'Xuất Bản Fanpage (Đăng Video Reel)',
+            fanpageName: page.name || 'Không rõ',
+            postTitle: reel.wp_post_title || 'Video Reel',
+            step: 'Đăng tải video Reel lên Facebook qua Graph API',
+            rawError: extractedError,
+            nextAction: 'Đã thử lại 3 lần thất bại. Vui lòng kiểm tra lại token Fanpage hoặc quyền đăng bài.',
+            memberEmail: ownerEmail,
+          });
+          this.telegramService.ztteam_sendMessage(alertMsg).catch(() => {});
+        }
       }
     }
   }
@@ -740,18 +754,32 @@ export class ZTTeamPublisherCron {
           if (u) ownerEmail = u.email;
         }
 
-        const alertMsg = this.telegramService.ztteam_formatAlert({
-          systemName: isIdentityCheckpoint ? 'Xác Minh Danh Tính Fanpage' : 'Xuất Bản Fanpage (Đăng Ảnh 2K)',
-          fanpageName: page.name || 'Không rõ',
-          postTitle: image.wp_post_title || 'Bài viết ảnh',
-          step: 'Đăng tải ảnh 2K và nội dung Caption lên Fanpage Facebook',
-          rawError: extractedError,
-          nextAction: isIdentityCheckpoint
-            ? 'Hệ thống đã tự động tạm ngắt xuất bản trên Page này để bảo vệ BM. Vui lòng mở ứng dụng Facebook trên điện thoại -> Chuyển sang Page -> Đăng thử 1 bài viết để xác nhận danh tính, sau đó bật lại tự động đăng trên web.'
-            : 'Đã thử lại 3 lần thất bại. Vui lòng kiểm tra lại token Fanpage hoặc kết nối mạng.',
-          memberEmail: ownerEmail,
-        });
-        this.telegramService.ztteam_sendMessage(alertMsg).catch(() => {});
+        if (isIdentityCheckpoint) {
+          const checkpointAlert =
+            `🚨 <b>[CẢNH BÁO: FANPAGE CẦN XÁC MINH DANH TÍNH]</b>\n\n` +
+            `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
+            `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
+            `📄 <b>Bài viết:</b> ${image.wp_post_title || 'Bài viết ảnh'}\n` +
+            `❌ <b>Lỗi Facebook:</b> Yêu cầu Quản trị viên mở điện thoại xác minh danh tính (Code 368 / Subcode 4854002)\n` +
+            `🛡️ <b>Hành động hệ thống:</b> ĐÃ TỰ ĐỘNG TẠM DỪNG ĐĂNG BÀI trên Page này để bảo vệ BM và các Page khác.\n\n` +
+            `👉 <b>HƯỚNG DẪN MỞ KHÓA NGAY:</b>\n` +
+            `1. Mở ứng dụng Facebook trên điện thoại của Admin\n` +
+            `2. Chuyển sang Trang <b>${page.name}</b>\n` +
+            `3. Đăng thử 1 bài viết bất kỳ và làm theo thông báo xác nhận danh tính của Facebook trên điện thoại\n` +
+            `4. Sau khi đăng được, vào Cài đặt Page trên web và bật lại nút tự động đăng.`;
+          this.telegramService.ztteam_sendMessage(checkpointAlert).catch(() => {});
+        } else {
+          const alertMsg = this.telegramService.ztteam_formatAlert({
+            systemName: 'Xuất Bản Fanpage (Đăng Ảnh 2K)',
+            fanpageName: page.name || 'Không rõ',
+            postTitle: image.wp_post_title || 'Bài viết ảnh',
+            step: 'Đăng tải ảnh 2K và nội dung Caption lên Fanpage Facebook',
+            rawError: extractedError,
+            nextAction: 'Đã thử lại 3 lần thất bại. Vui lòng kiểm tra lại token Fanpage hoặc kết nối mạng.',
+            memberEmail: ownerEmail,
+          });
+          this.telegramService.ztteam_sendMessage(alertMsg).catch(() => {});
+        }
       }
     }
   }

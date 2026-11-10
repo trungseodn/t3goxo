@@ -79,6 +79,43 @@ export class ZTTeamFetcherService {
   }
 
   /**
+   * ZTTeam: Trích xuất ngày xuất bản bài viết từ meta tag, time tag hoặc cấu trúc URL
+   */
+  private ztteam_extractPublishedDate($: any, url: string, rawText?: string): Date | null {
+    try {
+      if ($) {
+        const dateMeta = $('meta[property="article:published_time"]').attr('content') ||
+                         $('meta[property="og:published_time"]').attr('content') ||
+                         $('meta[name="pubdate"]').attr('content') ||
+                         $('meta[name="publish-date"]').attr('content') ||
+                         $('meta[name="date"]').attr('content') ||
+                         $('time[datetime]').attr('datetime') ||
+                         $('time').attr('datetime');
+        if (dateMeta) {
+          const parsed = new Date(dateMeta);
+          if (!isNaN(parsed.getTime())) return parsed;
+        }
+      }
+
+      // Try URL pattern: /2026/11/08/ or /2026-11-08/
+      const match = url.match(/\/(202\d)[\/\-_](\d{1,2})[\/\-_](\d{1,2})/);
+      if (match) {
+        const parsed = new Date(`${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`);
+        if (!isNaN(parsed.getTime())) return parsed;
+      }
+
+      if (rawText) {
+        const textMatch = rawText.match(/(?:published|posted|date)[:\s]+([A-Za-z]+ \d{1,2}, \d{4}|\d{4}-\d{2}-\d{2})/i);
+        if (textMatch) {
+          const parsed = new Date(textMatch[1]);
+          if (!isNaN(parsed.getTime())) return parsed;
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  /**
    * ZTTeam: Kiểm tra thông minh URL có phải là bài viết đơn lẻ (Single Story Article) thực sự hay không.
    * Loại trừ hoàn toàn: Trang chủ, chuyên mục (/c/, /category/), thẻ tag, tác giả, phân trang, feed, và các trang tĩnh.
    */
@@ -431,6 +468,8 @@ export class ZTTeamFetcherService {
       }
     }
 
+    const publishedDate = this.ztteam_extractPublishedDate(null, url, text);
+
     return {
       title: finalTitle,
       image: featuredImage || images[0] || null,
@@ -441,6 +480,7 @@ export class ZTTeamFetcherService {
       excerpt: cleanContent.substring(0, 200),
       siteName: this.ztteam_extractDomain(url),
       url,
+      publishedDate,
     };
   }
 
@@ -763,6 +803,8 @@ export class ZTTeamFetcherService {
         });
       }
 
+      const publishedDate = this.ztteam_extractPublishedDate($, url, html);
+
       return {
         title,
         image,
@@ -773,6 +815,7 @@ export class ZTTeamFetcherService {
         excerpt,
         siteName: siteName || this.ztteam_extractDomain(url),
         url,
+        publishedDate,
       };
     } catch (directErr: any) {
       /** Nếu lỗi xuất phát từ việc vi phạm tiêu chuẩn bài viết (trang chuyên mục/rác), ném lỗi luôn, không gọi proxy */

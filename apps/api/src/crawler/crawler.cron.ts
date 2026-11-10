@@ -247,7 +247,16 @@ export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
   private async ztteam_crawlSource(source: any) {
     /** 1. Quét phân trang động linh hoạt (Dynamic Flexible Pagination) */
     const urlsToFetch: string[] = [];
-    const maxScanPages = 10; /** Quét tối đa 10 trang lưu trữ */
+
+    const targetSiteObj = await this.prisma.ztteam_target_sites.findUnique({
+      where: { id: source.target_site_id },
+      select: { wp_url: true }
+    });
+    const isNewsSite = targetSiteObj?.wp_url && (
+      targetSiteObj.wp_url.includes('imsb.info') ||
+      targetSiteObj.wp_url.includes('mv.imsb.info')
+    );
+    const maxScanPages = isNewsSite ? 2 : 10; /** Website tin tức chỉ quét 1-2 trang mới nhất, không quét sâu vào bài cũ */
 
     for (let p = 1; p <= maxScanPages; p++) {
       const pageUrl = this.ztteam_generatePageUrl(source.source_url, p);
@@ -386,6 +395,20 @@ export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
         processedCount++;
         attemptCount++;
       } catch (err: any) {
+        /** ZTTeam: Kiểm tra nếu bài viết quá 5 ngày đối với website tin tức */
+        const isTooOld = err.message?.includes('Bài viết quá cũ (> 5 ngày)');
+        if (isTooOld) {
+          this.logger.log(`[TỰ ĐỘNG BỎ QUA - QUÁ 5 NGÀY] Bài viết tin tức cũ hơn 5 ngày: ${url}`);
+          try {
+            await this.prisma.ztteam_crawl_history.upsert({
+              where: { source_id_url: { source_id: source.id, url } },
+              create: { source_id: source.id, url, status: 'SKIPPED_TOO_OLD' },
+              update: { status: 'SKIPPED_TOO_OLD' }
+            });
+          } catch (e) {}
+          continue; /** Chuyển sang URL tiếp theo, không gửi cảnh báo lỗi Telegram */
+        }
+
         /** ZTTeam: Kiểm tra nếu lỗi do vi phạm cổng kiểm duyệt bài viết hoặc bài viết không đủ điều kiện ảnh/nội dung */
         const isConditionUnmet = err.message?.includes('Không phải bài viết hợp lệ') ||
                                  err.message?.includes('Nội dung không đạt tiêu chuẩn bài viết') ||

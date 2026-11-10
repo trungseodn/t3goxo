@@ -1079,6 +1079,36 @@ export default function FacebookPages() {
         </div>
       )}
 
+      {/* Checkpoint Identity Warning Banner */}
+      {checkpointPagesCount > 0 && (
+        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-lg">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+              <span className="material-symbols-outlined text-xl">shield_lock</span>
+            </div>
+            <div>
+              <p className="font-extrabold text-sm text-amber-300">
+                <span className="material-symbols-outlined text-[18px] text-amber-400 align-middle mr-1">warning</span>
+                XÁC MINH DANH TÍNH: Có {checkpointPagesCount} Fanpage bị Facebook tạm chặn đăng bài!
+              </p>
+              <p className="text-xs text-slate-200 mt-1">
+                Các Page: <b className="text-amber-300">{pages.filter(p => p.isCheckpointBlocked).map(p => p.name).join(', ')}</b>
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1">
+                👉 <b>Cách mở:</b> Mở Facebook trên điện thoại Admin &gt; Chuyển sang Page &gt; Đăng thử 1 bài viết bất kỳ và xác nhận danh tính &gt; Bật lại nút tự động đăng trên web.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setFilterStatus(filterStatus === 'checkpoint' ? '' : 'checkpoint')}
+            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold rounded-full text-xs shrink-0 flex items-center gap-1.5 transition-colors shadow-lg shadow-amber-500/20"
+          >
+            <span className="material-symbols-outlined text-sm">filter_alt</span>
+            {filterStatus === 'checkpoint' ? 'Bỏ lọc Checkpoint' : `Xem ${checkpointPagesCount} Page`}
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3">
           <span className="material-symbols-outlined text-red-500 [font-variation-settings:'FILL'_1]">warning</span>
