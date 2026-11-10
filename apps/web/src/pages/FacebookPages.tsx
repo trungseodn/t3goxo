@@ -223,21 +223,21 @@ function FanpageCard({ page, isExpired, testingPageId, handleTestPost, handleTog
                   </div>
                 </div>
               )}
-              {((page.failedPostsCount || 0) > 0 || page.hasFailedPosts) && (
+              {((page.failedPostsCount || 0) > 0) && (
                 <div className="relative group/failedBadge shrink-0 cursor-help">
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-500/20 text-red-400 border border-red-500/40 shadow-sm">
                     <span className="material-symbols-outlined text-[13px] text-red-400">report_problem</span>
-                    <span>Lỗi {page.failedPostsCount || 1} bài</span>
+                    <span>Lỗi {page.failedPostsCount} bài</span>
                   </span>
 
                   {/** Tooltip giải thích chi tiết khi hover */}
                   <div className="absolute left-0 sm:left-1/2 sm:-translate-x-1/2 top-full mt-2 w-72 p-3 bg-[#0b1329] rounded-xl border border-red-500/30 shadow-2xl z-50 invisible group-hover/failedBadge:visible opacity-0 group-hover/failedBadge:opacity-100 transition-all pointer-events-none text-left">
                     <div className="flex items-center gap-1.5 text-red-400 font-bold text-xs mb-1">
                       <span className="material-symbols-outlined text-sm">report_problem</span>
-                      <span>Có {page.failedPostsCount || 1} bài đăng bị lỗi</span>
+                      <span>Có {page.failedPostsCount} bài đăng lỗi chưa xử lý</span>
                     </div>
                     <p className="text-[11px] text-slate-300 leading-relaxed">
-                      Trang này có bài viết hoặc video reel bị lỗi khi render hoặc đăng lên Facebook. Hãy kiểm tra danh sách bài viết hoặc Reel để xử lý lại.
+                      Trang này có bài viết hoặc video reel bị lỗi chưa được xử lý. Các bài đã đăng thành công hoặc đã đưa vào hàng chờ render lại sẽ không hiển thị tại đây.
                     </p>
                   </div>
                 </div>
@@ -685,7 +685,7 @@ export default function FacebookPages() {
   const uniqueTags = Array.from(new Set(pages.flatMap(p => p.tags || [])));
 
   // Đếm số lượng page theo từng trạng thái lỗi / checkpoint / die
-  const failedPostsPagesCount = pages.filter(p => (p.failedPostsCount || 0) > 0 || p.hasFailedPosts).length;
+  const failedPostsPagesCount = pages.filter(p => (p.failedPostsCount || 0) > 0).length;
   const checkpointPagesCount = pages.filter(p => p.isCheckpointBlocked).length;
   const deadPagesCount = pages.filter(p => p.isDead || p.status === 'expired' || p.status === 'die' || p.status === 'invalid' || p.status === 'restricted').length;
 
@@ -701,7 +701,7 @@ export default function FacebookPages() {
     if (filterOwner && p.ownerName !== filterOwner) match = false;
     if (filterBusiness && p.businessName !== filterBusiness) match = false;
     if (filterTag && (!p.tags || !p.tags.includes(filterTag))) match = false;
-    if (filterStatus === 'failed_posts' && !((p.failedPostsCount || 0) > 0 || p.hasFailedPosts)) match = false;
+    if (filterStatus === 'failed_posts' && !((p.failedPostsCount || 0) > 0)) match = false;
     if (filterStatus === 'checkpoint' && !p.isCheckpointBlocked) match = false;
     if (filterStatus === 'dead' && !(p.isDead || p.status === 'expired' || p.status === 'die' || p.status === 'invalid' || p.status === 'restricted')) match = false;
     if (filterSearch && filterSearch.trim().length > 0) {

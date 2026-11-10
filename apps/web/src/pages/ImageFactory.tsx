@@ -210,8 +210,8 @@ export default function ImageFactory() {
             {images.map(image => {
               const isRendering = image.status === 'RENDERING' || image.status === 'PROCESSING' || image.status === 'QUEUED';
               const isCompleted = image.status === 'COMPLETED';
-              const isPosted = image.status === 'POSTED';
-              const isFailed = image.status === 'FAILED';
+              const isPosted = image.status === 'POSTED' || image.is_posted;
+              const isFailed = !isPosted && (image.status === 'FAILED' || image.video_status === 'FAILED') && !['PENDING', 'PROCESSING', 'COMPLETED'].includes(image.video_status);
               const isPublishingNow = isPosting[image.id] || false;
 
               /** Build tracking link and caption preview */
@@ -276,7 +276,7 @@ export default function ImageFactory() {
                         </p>
                       </div>
                     </div>
-                    {ztteam_getStatusBadge(image.status)}
+                    {ztteam_getStatusBadge(image.is_posted ? 'POSTED' : (['PENDING', 'PROCESSING'].includes(image.video_status) && image.status === 'FAILED' ? 'RENDERING' : image.status))}
                   </div>
 
                   {/** Website Source Badge (Explicitly Requested) */}

@@ -644,23 +644,39 @@ export class ZTTeamFacebookService {
     });
 
     try {
-      const recentFailedPosts = await this.prisma.ztteam_images.findMany({
-        where: {
-          page_id: { in: pages.map(p => p.id) },
-          status: 'FAILED',
-          error_log: { contains: '4854002' },
-          updated_at: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) }
-        },
-        select: { page_id: true }
+      const [recentFailedImages, recentFailedReels] = await Promise.all([
+        this.prisma.ztteam_images.findMany({
+          where: {
+            page_id: { in: pages.map(p => p.id) },
+            is_posted: false,
+            status: 'FAILED',
+            error_log: { contains: '4854002' },
+            updated_at: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) }
+          },
+          select: { page_id: true }
+        }),
+        this.prisma.ztteam_reels.findMany({
+          where: {
+            page_id: { in: pages.map(p => p.id) },
+            is_posted: false,
+            status: 'FAILED',
+            error_log: { contains: '4854002' },
+            updated_at: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) }
+          },
+          select: { page_id: true }
+        })
+      ]);
+      recentFailedImages.forEach(post => {
+        if (post.page_id) checkpointPageIds.add(post.page_id);
       });
-      recentFailedPosts.forEach(post => {
+      recentFailedReels.forEach(post => {
         if (post.page_id) checkpointPageIds.add(post.page_id);
       });
     } catch (e: any) {
       /** Bỏ qua lỗi phụ */
     }
 
-    /** ZTTeam: Thống kê tổng số bài đăng lỗi (Images + Reels) cho từng Page */
+    /** ZTTeam: Thống kê tổng số bài đăng lỗi CHƯA XỬ LÝ (Images + Reels) cho từng Page */
     const failedImagesMap = new Map<string, number>();
     const failedReelsMap = new Map<string, number>();
     try {
@@ -670,9 +686,13 @@ export class ZTTeamFacebookService {
           by: ['page_id'],
           where: {
             page_id: { in: pageIdList },
+            is_posted: false,
             OR: [
-              { status: 'FAILED' },
-              { video_status: 'FAILED' }
+              { video_status: 'FAILED' },
+              {
+                status: 'FAILED',
+                video_status: { notIn: ['PENDING', 'PROCESSING', 'COMPLETED'] }
+              }
             ]
           },
           _count: { id: true }
@@ -681,6 +701,7 @@ export class ZTTeamFacebookService {
           by: ['page_id'],
           where: {
             page_id: { in: pageIdList },
+            is_posted: false,
             status: 'FAILED'
           },
           _count: { id: true }
@@ -791,16 +812,29 @@ export class ZTTeamFacebookService {
     let isCheckpointBlocked = page.token_status === 'checkpoint_required';
     if (!isCheckpointBlocked) {
       try {
-        const recentFailed = await this.prisma.ztteam_images.findFirst({
-          where: {
-            page_id: page.id,
-            status: 'FAILED',
-            error_log: { contains: '4854002' },
-            updated_at: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) }
-          },
-          select: { id: true }
-        });
-        if (recentFailed) isCheckpointBlocked = true;
+        const [recentFailedImg, recentFailedReel] = await Promise.all([
+          this.prisma.ztteam_images.findFirst({
+            where: {
+              page_id: page.id,
+              is_posted: false,
+              status: 'FAILED',
+              error_log: { contains: '4854002' },
+              updated_at: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) }
+            },
+            select: { id: true }
+          }),
+          this.prisma.ztteam_reels.findFirst({
+            where: {
+              page_id: page.id,
+              is_posted: false,
+              status: 'FAILED',
+              error_log: { contains: '4854002' },
+              updated_at: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) }
+            },
+            select: { id: true }
+          })
+        ]);
+        if (recentFailedImg || recentFailedReel) isCheckpointBlocked = true;
       } catch (e: any) {
         /** Bỏ qua lỗi phụ */
       }

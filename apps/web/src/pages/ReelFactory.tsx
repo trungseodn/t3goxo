@@ -180,7 +180,7 @@ export default function ReelFactory() {
                 {/* Header Card (Action Bar) */}
                 <div className="px-4 py-3 border-b border-white/5 bg-fb-surface-hover/30 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    {ztteam_getStatusIcon(reel.status)}
+                    {ztteam_getStatusIcon(reel.is_posted ? 'POSTED' : reel.status)}
                     {reel.wp_post_url && (
                       <a href={reel.wp_post_url} target="_blank" rel="noreferrer" title="Xem bài viết gốc" className="w-8 h-8 rounded-full bg-fb-surface-hover hover:bg-fb-surface flex items-center justify-center text-fb-text-muted hover:text-cyan-400 transition-colors">
                         <span className="material-symbols-outlined text-[16px]">link</span>

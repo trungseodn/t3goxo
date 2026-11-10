@@ -79,10 +79,20 @@ export class ZTTeamDashboardService {
 
     const [reelsFailed, imagesFailed] = await Promise.all([
       this.prisma.ztteam_reels.count({
-        where: { page_id: { in: pageIds }, status: 'FAILED' },
+        where: { page_id: { in: pageIds }, status: 'FAILED', is_posted: false },
       }),
       this.prisma.ztteam_images.count({
-        where: { page_id: { in: pageIds }, status: 'FAILED' },
+        where: {
+          page_id: { in: pageIds },
+          is_posted: false,
+          OR: [
+            { video_status: 'FAILED' },
+            {
+              status: 'FAILED',
+              video_status: { notIn: ['PENDING', 'PROCESSING', 'COMPLETED'] }
+            }
+          ]
+        },
       }),
     ]);
     const totalFailed = reelsFailed + imagesFailed;
@@ -129,10 +139,21 @@ export class ZTTeamDashboardService {
     startOfDay.setHours(0,0,0,0);
     const [failedReelsToday, failedImagesToday] = await Promise.all([
       this.prisma.ztteam_reels.count({
-        where: { page_id: { in: pageIds }, status: 'FAILED', updated_at: { gte: startOfDay } }
+        where: { page_id: { in: pageIds }, status: 'FAILED', is_posted: false, updated_at: { gte: startOfDay } }
       }),
       this.prisma.ztteam_images.count({
-        where: { page_id: { in: pageIds }, status: 'FAILED', updated_at: { gte: startOfDay } }
+        where: {
+          page_id: { in: pageIds },
+          is_posted: false,
+          OR: [
+            { video_status: 'FAILED' },
+            {
+              status: 'FAILED',
+              video_status: { notIn: ['PENDING', 'PROCESSING', 'COMPLETED'] }
+            }
+          ],
+          updated_at: { gte: startOfDay }
+        }
       }),
     ]);
     const failedToday = failedReelsToday + failedImagesToday;
@@ -541,11 +562,11 @@ export class ZTTeamDashboardService {
         let failed = 0;
         pageReels.forEach((r) => {
           if (r.is_posted) published += r._count.id;
-          if (r.status === 'FAILED') failed += r._count.id;
+          if (r.status === 'FAILED' && !r.is_posted) failed += r._count.id;
         });
         pageImages.forEach((img) => {
           if (img.is_posted) published += img._count.id;
-          if (img.status === 'FAILED') failed += img._count.id;
+          if (img.status === 'FAILED' && !img.is_posted) failed += img._count.id;
         });
 
         const sysPostIds = pageToSystemPostIds.get(page.id) || new Set<string>();

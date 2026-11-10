@@ -184,6 +184,8 @@ export class ZTTeamImageController {
         where.is_posted = false;
       } else if (s === 'FAILED') {
         where.status = 'FAILED';
+        where.is_posted = false;
+        where.video_status = { notIn: ['PENDING', 'PROCESSING', 'COMPLETED'] };
       }
     }
 
@@ -237,7 +239,12 @@ export class ZTTeamImageController {
         where: { ...baseWhere, OR: [{ is_posted: true }, { status: 'POSTED' }] },
       }),
       this.prisma.ztteam_images.count({
-        where: { ...baseWhere, status: 'FAILED' },
+        where: {
+          ...baseWhere,
+          status: 'FAILED',
+          is_posted: false,
+          video_status: { notIn: ['PENDING', 'PROCESSING', 'COMPLETED'] },
+        },
       }),
       this.prisma.ztteam_images.count({
         where: { ...baseWhere, video_status: 'FAILED', is_posted: false },
@@ -410,8 +417,10 @@ export class ZTTeamImageController {
     const updateRes = await this.prisma.ztteam_images.updateMany({
       where,
       data: {
+        ...(scope === 'unposted' ? { status: 'COMPLETED' } : {}),
         video_status: 'PENDING',
         error_log: null,
+        post_retry_count: 0,
         updated_at: new Date(),
       },
     });
@@ -675,6 +684,7 @@ export class ZTTeamImageController {
         where: { id },
         data: {
           status: 'COMPLETED',
+          ...(image.video_status === 'FAILED' ? { video_status: 'PENDING' } : {}),
           error_log: null,
           post_retry_count: 0,
         }
@@ -922,6 +932,12 @@ export class ZTTeamImageController {
     const engine = (post.page as any)?.video_engine || 'hook_image';
 
     if (engine === 'hook_image' || engine === 'text_story') {
+      if (!post.is_posted && post.status === 'FAILED') {
+        await this.prisma.ztteam_images.update({
+          where: { id },
+          data: { status: 'COMPLETED', post_retry_count: 0, error_log: null }
+        });
+      }
       /** Kích hoạt render Video Hook sắc nét / Text Story 10s tự động ngay tại server (cho phép force đối với bài đã xuất bản ảnh) */
       this.hookVideoService.ztteam_renderHookVideo(id, { forceRegenHook: true }).catch(err => {
         this.logger.error(`[Manual Hook/Text Story Video Error] ${err.message}`);
@@ -939,7 +955,11 @@ export class ZTTeamImageController {
     /** Nếu là Muse: Đưa vào hàng đợi cho Worker ngoài */
     const updated = await this.prisma.ztteam_images.update({
       where: { id },
-      data: { video_status: 'PENDING', error_log: null },
+      data: {
+        video_status: 'PENDING',
+        error_log: null,
+        ...(!post.is_posted && post.status === 'FAILED' ? { status: 'COMPLETED', post_retry_count: 0 } : {})
+      },
     });
     this.eventEmitter.emit('image.updated', updated);
 
