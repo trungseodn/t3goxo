@@ -16,6 +16,7 @@ export interface ZTTeamFetchResult {
   excerpt: string;
   siteName: string | null;
   url: string;
+  publishedDate?: Date | null;
 }
 
 @Injectable()
