@@ -223,6 +223,25 @@ function FanpageCard({ page, isExpired, testingPageId, handleTestPost, handleTog
                   </div>
                 </div>
               )}
+              {((page.failedPostsCount || 0) > 0 || page.hasFailedPosts) && (
+                <div className="relative group/failedBadge shrink-0 cursor-help">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-500/20 text-red-400 border border-red-500/40 shadow-sm">
+                    <span className="material-symbols-outlined text-[13px] text-red-400">report_problem</span>
+                    <span>Lỗi {page.failedPostsCount || 1} bài</span>
+                  </span>
+
+                  {/** Tooltip giải thích chi tiết khi hover */}
+                  <div className="absolute left-0 sm:left-1/2 sm:-translate-x-1/2 top-full mt-2 w-72 p-3 bg-[#0b1329] rounded-xl border border-red-500/30 shadow-2xl z-50 invisible group-hover/failedBadge:visible opacity-0 group-hover/failedBadge:opacity-100 transition-all pointer-events-none text-left">
+                    <div className="flex items-center gap-1.5 text-red-400 font-bold text-xs mb-1">
+                      <span className="material-symbols-outlined text-sm">report_problem</span>
+                      <span>Có {page.failedPostsCount || 1} bài đăng bị lỗi</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      Trang này có bài viết hoặc video reel bị lỗi khi render hoặc đăng lên Facebook. Hãy kiểm tra danh sách bài viết hoặc Reel để xử lý lại.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-2 mt-1 text-[11px] font-medium text-fb-text-muted">
               <span className="truncate block">Nick: <b className="text-blue-400">{page.ownerName || 'Admin'}</b></span>
@@ -280,8 +299,8 @@ function FanpageCard({ page, isExpired, testingPageId, handleTestPost, handleTog
         </div>
 
         {isExpired ? (
-          <span className="px-2.5 py-1 bg-red-500/20 text-red-400 rounded-full text-[10px] font-extrabold shrink-0 flex items-center gap-1 shadow-sm">
-            <span className="material-symbols-outlined text-xs">error</span> Lỗi Token
+          <span className="px-2.5 py-1 bg-red-500/20 text-red-400 rounded-full text-[10px] font-extrabold shrink-0 flex items-center gap-1 shadow-sm border border-red-500/30">
+            <span className="material-symbols-outlined text-xs">error</span> Page Die / Lỗi Token
           </span>
         ) : page.isCheckpointBlocked ? (
           <span className="px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded-full text-[10px] font-extrabold shrink-0 flex items-center gap-1 shadow-sm border border-amber-500/30">
@@ -623,6 +642,7 @@ export default function FacebookPages() {
   const [filterBusiness, setFilterBusiness] = useState('');
   const [filterTag, setFilterTag] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
 
   /** State quản lý chọn hàng loạt */
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
@@ -664,11 +684,26 @@ export default function FacebookPages() {
   const uniqueBusinesses = Array.from(new Set(pages.map(p => p.businessName).filter(Boolean)));
   const uniqueTags = Array.from(new Set(pages.flatMap(p => p.tags || [])));
 
+  // Đếm số lượng page theo từng trạng thái lỗi / checkpoint / die
+  const failedPostsPagesCount = pages.filter(p => (p.failedPostsCount || 0) > 0 || p.hasFailedPosts).length;
+  const checkpointPagesCount = pages.filter(p => p.isCheckpointBlocked).length;
+  const deadPagesCount = pages.filter(p => p.isDead || p.status === 'expired' || p.status === 'die' || p.status === 'invalid' || p.status === 'restricted').length;
+
+  const statusFilterOptions = [
+    { value: '', label: 'Tất cả trạng thái' },
+    { value: 'failed_posts', label: `Bài đăng lỗi (${failedPostsPagesCount})` },
+    { value: 'checkpoint', label: `Cần xác minh danh tính (${checkpointPagesCount})` },
+    { value: 'dead', label: `Page die / Lỗi Token (${deadPagesCount})` },
+  ];
+
   const filteredPages = pages.filter(p => {
     let match = true;
     if (filterOwner && p.ownerName !== filterOwner) match = false;
     if (filterBusiness && p.businessName !== filterBusiness) match = false;
     if (filterTag && (!p.tags || !p.tags.includes(filterTag))) match = false;
+    if (filterStatus === 'failed_posts' && !((p.failedPostsCount || 0) > 0 || p.hasFailedPosts)) match = false;
+    if (filterStatus === 'checkpoint' && !p.isCheckpointBlocked) match = false;
+    if (filterStatus === 'dead' && !(p.isDead || p.status === 'expired' || p.status === 'die' || p.status === 'invalid' || p.status === 'restricted')) match = false;
     if (filterSearch && filterSearch.trim().length > 0) {
       const q = filterSearch.toLowerCase().trim();
       const nameMatch = (p.name || '').toLowerCase().includes(q);
@@ -958,7 +993,7 @@ export default function FacebookPages() {
     }
   };
 
-  const expiredPagesCount = pages.filter(p => p.status === 'expired').length;
+  const expiredPagesCount = pages.filter(p => p.isDead || p.status === 'expired' || p.status === 'die' || p.status === 'invalid' || p.status === 'restricted').length;
   const totalFollowers = activePages.reduce((acc, p) => acc + (p.followersCount || 0), 0);
   const formattedFollowers = totalFollowers > 1000000 ? (totalFollowers / 1000000).toFixed(1) + 'M' :
     totalFollowers > 1000 ? (totalFollowers / 1000).toFixed(1) + 'k' : totalFollowers;
@@ -1195,6 +1230,12 @@ export default function FacebookPages() {
                 className="flex-1 sm:w-40"
               />
             )}
+            <CustomDropdown
+              value={filterStatus}
+              onChange={(val) => setFilterStatus(val)}
+              options={statusFilterOptions}
+              className="flex-1 sm:w-56"
+            />
             <button onClick={() => ztteam_fetchPagesFromDB()} disabled={isLoading} className="px-3 py-2 rounded-full bg-fb-surface-hover text-fb-text-muted hover:text-fb-text text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-50 transition-colors shrink-0">
               <span className={`material-symbols-outlined text-base shrink-0 ${isLoading ? 'animate-spin' : ''}`}>refresh</span>
             </button>
@@ -1235,6 +1276,16 @@ export default function FacebookPages() {
               >
                 <span className="material-symbols-outlined text-sm">person</span>
                 <span>Chọn cả Nick: {filterOwner}</span>
+              </button>
+            )}
+
+            {filterStatus && (
+              <button
+                onClick={() => setFilterStatus('')}
+                className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold flex items-center gap-1.5 transition-colors border border-slate-600/40"
+              >
+                <span className="material-symbols-outlined text-sm text-amber-400">filter_alt_off</span>
+                <span>Bỏ lọc trạng thái</span>
               </button>
             )}
 
@@ -1311,7 +1362,7 @@ export default function FacebookPages() {
                 <FanpageCard
                   key={page.id}
                   page={page}
-                  isExpired={page.status === 'expired'}
+                  isExpired={page.isDead || page.status === 'expired' || page.status === 'die' || page.status === 'invalid' || page.status === 'restricted'}
                   testingPageId={testingPageId}
                   handleTestPost={handleTestPost}
                   handleToggleActive={handleTogglePageActive}

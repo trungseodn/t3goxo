@@ -660,6 +660,43 @@ export class ZTTeamFacebookService {
       /** Bỏ qua lỗi phụ */
     }
 
+    /** ZTTeam: Thống kê tổng số bài đăng lỗi (Images + Reels) cho từng Page */
+    const failedImagesMap = new Map<string, number>();
+    const failedReelsMap = new Map<string, number>();
+    try {
+      const pageIdList = pages.map(p => p.id);
+      const [failedImagesGroup, failedReelsGroup] = await Promise.all([
+        this.prisma.ztteam_images.groupBy({
+          by: ['page_id'],
+          where: {
+            page_id: { in: pageIdList },
+            OR: [
+              { status: 'FAILED' },
+              { video_status: 'FAILED' }
+            ]
+          },
+          _count: { id: true }
+        }),
+        this.prisma.ztteam_reels.groupBy({
+          by: ['page_id'],
+          where: {
+            page_id: { in: pageIdList },
+            status: 'FAILED'
+          },
+          _count: { id: true }
+        })
+      ]);
+
+      failedImagesGroup.forEach(item => {
+        if (item.page_id) failedImagesMap.set(item.page_id, item._count.id);
+      });
+      failedReelsGroup.forEach(item => {
+        if (item.page_id) failedReelsMap.set(item.page_id, item._count.id);
+      });
+    } catch (err: any) {
+      this.logger.warn(`Could not group failed posts: ${err?.message}`);
+    }
+
     const result = await Promise.all(pages.map(async p => {
       const times = await this.ztteam_computePageTimesAndNextVideo(p);
 
@@ -719,7 +756,10 @@ export class ZTTeamFacebookService {
         pendingImagesCount,
         pendingReelsCount,
         totalPendingCount: pendingImagesCount + pendingReelsCount,
+        failedPostsCount: (failedImagesMap.get(p.id) || 0) + (failedReelsMap.get(p.id) || 0),
+        hasFailedPosts: ((failedImagesMap.get(p.id) || 0) + (failedReelsMap.get(p.id) || 0)) > 0,
         isCheckpointBlocked: checkpointPageIds.has(p.id),
+        isDead: p.token_status === 'expired' || p.token_status === 'die' || p.token_status === 'invalid' || p.token_status === 'restricted',
         /** We do not send accessToken back to frontend for security */
       };
     }));

@@ -246,8 +246,27 @@ export class ZTTeamPublisherCron {
 
         /** 5. Phân loại bài đăng Video Reel và Ảnh cho Page này */
         const pageReelsOld = pendingReels.filter(r => r.page_id === pageId);
-        const pageImagesWithVideo = pendingImages.filter(i => i.page_id === pageId && i.video_url);
-        const pageImagesOnly = pendingImages.filter(i => i.page_id === pageId && !i.video_url);
+        
+        /** ZTTeam: Chỉ công nhận video Reel khi file MP4 thực sự tồn tại trên máy chủ */
+        const pageImagesWithVideo = pendingImages.filter(i => {
+          if (i.page_id !== pageId || !i.video_url) return false;
+          let absoluteVideoPath = '';
+          if (i.video_url.startsWith('/storage/')) {
+            absoluteVideoPath = path.join(ztteam_getStorageRoot(), i.video_url.replace(/^\/storage\//, ''));
+          } else {
+            absoluteVideoPath = path.join(ztteam_getStorageRoot(), i.video_url.replace(/^[/\\]+/, ''));
+          }
+          const exists = fs.existsSync(absoluteVideoPath);
+          if (!exists) {
+            this.prisma.ztteam_images.update({
+              where: { id: i.id },
+              data: { video_status: 'PENDING', video_url: null, error_log: 'Tự động đưa về hàng chờ: File video MP4 không tồn tại' }
+            }).catch(() => {});
+          }
+          return exists;
+        });
+
+        const pageImagesOnly = pendingImages.filter(i => i.page_id === pageId && (!i.video_url || !pageImagesWithVideo.some(v => v.id === i.id)));
 
         /** Tập hợp tất cả các ứng viên Reel */
         const allAvailableReels = [
@@ -261,13 +280,11 @@ export class ZTTeamPublisherCron {
         let selectedItem: { type: 'reel_legacy' | 'image_reel' | 'image_only'; data: any } | null = null;
 
         if (post_format === 'reel') {
-          /** Cấu hình: Nếu chọn reel thì đăng reel, nếu bài chuẩn bị đăng ko có reel thì đăng ảnh (đảm bảo phải có bài để đăng) */
+          /** Cấu hình: Định dạng Reel bắt buộc đăng Reel/Video, tuyệt đối không tự ý đăng ảnh thay thế */
           if (allAvailableReels.length > 0) {
             selectedItem = allAvailableReels[0];
-          } else if (allAvailableImages.length > 0) {
-            selectedItem = allAvailableImages[0];
-          } else if (pageImagesWithVideo.length > 0) {
-            selectedItem = { type: 'image_only', data: pageImagesWithVideo[0] };
+          } else {
+            this.logger.log(`Page ${page.name}: Cấu hình định dạng Reel nhưng chưa có video nào hoàn tất trên máy chủ -> Đang chờ render video để xuất bản chuẩn Reel.`);
           }
         } else if (post_format === 'image') {
           /** Cấu hình: Nếu chọn ảnh thì chắc chắn phải đăng ảnh */
@@ -277,22 +294,18 @@ export class ZTTeamPublisherCron {
             selectedItem = { type: 'image_only', data: pageImagesWithVideo[0] };
           }
         } else {
-          /** Cấu hình: Nếu chọn ảnh và reel xen kẽ thì đăng đúng chuẩn, trường hợp reel ko có vẫn đăng ảnh */
+          /** Cấu hình mixed: Đăng xen kẽ Ảnh và Reel */
           if (lastPostType === 'reel') {
-            /** Lượt trước đăng Reel -> Lượt này đăng Ảnh */
             if (allAvailableImages.length > 0) {
               selectedItem = allAvailableImages[0];
-            } else if (pageImagesWithVideo.length > 0) {
-              selectedItem = { type: 'image_only', data: pageImagesWithVideo[0] };
+            } else if (allAvailableReels.length > 0) {
+              selectedItem = allAvailableReels[0];
             }
           } else {
-            /** Lượt trước đăng Ảnh -> Lượt này đăng Reel. Trường hợp reel ko có vẫn đăng ảnh */
             if (allAvailableReels.length > 0) {
               selectedItem = allAvailableReels[0];
             } else if (allAvailableImages.length > 0) {
               selectedItem = allAvailableImages[0];
-            } else if (pageImagesWithVideo.length > 0) {
-              selectedItem = { type: 'image_only', data: pageImagesWithVideo[0] };
             }
           }
         }
@@ -608,6 +621,15 @@ export class ZTTeamPublisherCron {
           );
           fbPostId = response.id;
         } else {
+          /** Nếu Fanpage cấu hình đăng Reel, tuyệt đối không đăng ảnh thay thế khi file video bị thiếu */
+          if (page.post_format === 'reel') {
+            this.logger.warn(`File video ${image.video_url} không tồn tại trên server cho page Reel ${page.name}. Tự động đưa về PENDING để render lại.`);
+            await this.prisma.ztteam_images.update({
+              where: { id: image.id },
+              data: { video_status: 'PENDING', video_url: null, error_log: 'Tự động đưa về hàng chờ: File video MP4 không tồn tại' },
+            }).catch(() => {});
+            return;
+          }
           fbPostId = await this.facebookService.ztteam_publishPhoto(
             page.fb_page_id,
             absoluteImagePath,
