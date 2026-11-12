@@ -917,7 +917,7 @@ export class ZTTeamFacebookService {
 
     /** Update main page fields */
     const updateData: any = {
-      tags: config.tags,
+      tags: Array.isArray(config.tags) ? config.tags : (config.tags ? [config.tags] : []),
       post_format: config.post_format,
       video_engine: config.video_engine || 'hook_image',
       default_bgm: config.default_bgm !== undefined ? config.default_bgm : null,
@@ -928,9 +928,9 @@ export class ZTTeamFacebookService {
       link_view_threshold: config.link_view_threshold !== undefined ? Number(config.link_view_threshold) : 1000,
       link_target_placement: config.link_target_placement || 'comment',
       link_fallback_after_hours: config.link_fallback_after_hours !== undefined ? Number(config.link_fallback_after_hours) : 12,
-      schedule_mode: config.schedule_mode,
-      schedule_fixed_times: config.schedule_fixed_times,
-      schedule_immediate_gap_minutes: config.schedule_immediate_gap_minutes,
+      schedule_mode: config.schedule_mode || 'fixed',
+      schedule_fixed_times: Array.isArray(config.schedule_fixed_times) ? config.schedule_fixed_times : [],
+      schedule_immediate_gap_minutes: config.schedule_immediate_gap_minutes !== undefined ? Number(config.schedule_immediate_gap_minutes) : 60,
       default_reel_template_id: config.default_reel_template_id,
       default_image_template_id: config.default_image_template_id,
       auto_create_enabled: config.auto_create_enabled,
@@ -984,18 +984,21 @@ export class ZTTeamFacebookService {
 
     /** Handle sources */
     if (config.sources && Array.isArray(config.sources)) {
+      const validSources = config.sources.filter(
+        (s: any) => s && s.target_site_id && typeof s.target_site_id === 'string' && s.target_site_id.trim()
+      );
       /** Delete old sources */
       await this.prisma.ztteam_page_sources.deleteMany({
         where: { page_id: page.id }
       });
       /** Add new sources */
-      if (config.sources.length > 0) {
+      if (validSources.length > 0) {
         await this.prisma.ztteam_page_sources.createMany({
-          data: config.sources.map((s: any) => ({
+          data: validSources.map((s: any) => ({
             page_id: page.id,
-            target_site_id: s.target_site_id,
-            target_category_id: s.target_category_id !== null && s.target_category_id !== undefined ? String(s.target_category_id) : null,
-            target_tags: s.target_tags !== null && s.target_tags !== undefined ? String(s.target_tags) : null,
+            target_site_id: s.target_site_id.trim(),
+            target_category_id: s.target_category_id !== null && s.target_category_id !== undefined && String(s.target_category_id).trim() ? String(s.target_category_id).trim() : null,
+            target_tags: s.target_tags !== null && s.target_tags !== undefined && String(s.target_tags).trim() ? String(s.target_tags).trim() : null,
             is_active: s.is_active !== undefined ? Boolean(s.is_active) : true
           }))
         });

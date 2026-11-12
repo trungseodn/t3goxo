@@ -345,8 +345,9 @@ export default function FacebookPageSettings() {
   const ztteam_handleSave = async () => {
     try {
       setIsSaving(true);
+      const validSources = (sources || []).filter((s: any) => s && s.target_site_id && String(s.target_site_id).trim());
       await api.put(`facebook/pages/${id}/settings`, {
-        tags,
+        tags: Array.isArray(tags) ? tags : [],
         post_format: postFormat,
         video_engine: videoEngine,
         default_bgm: defaultBgm || null,
@@ -358,19 +359,20 @@ export default function FacebookPageSettings() {
         link_target_placement: linkTargetPlacement,
         link_fallback_after_hours: isFallbackEnabled ? (Number(linkFallbackAfterHours) || 12) : 0,
         schedule_mode: scheduleMode,
-        schedule_fixed_times: scheduleFixedTimes,
-        schedule_immediate_gap_minutes: scheduleImmediateGap,
+        schedule_fixed_times: Array.isArray(scheduleFixedTimes) ? scheduleFixedTimes : [],
+        schedule_immediate_gap_minutes: Number(scheduleImmediateGap) || 60,
         auto_create_enabled: false,
-        sources
+        sources: validSources
       });
       ztteam_showToast('Đã lưu cấu hình thành công', 'success');
       if (autoPublishEnabled) {
         setIsCheckpointBlocked(false);
       }
-      await ztteam_loadSettings();
+      await ztteam_fetchSettings();
       await ztteam_loadQueue(true);
     } catch (error: any) {
-      ztteam_showToast(error.response?.data?.message || 'Lỗi lưu cấu hình', 'error');
+      console.error('Error saving page settings:', error);
+      ztteam_showToast(error.response?.data?.message || error.message || 'Lỗi lưu cấu hình', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -384,10 +386,11 @@ export default function FacebookPageSettings() {
       ztteam_showToast(res.data?.message || 'Đã mở khóa Fanpage thành công', 'success');
       setAutoPublishEnabled(true);
       setIsCheckpointBlocked(false);
-      await ztteam_loadSettings();
+      await ztteam_fetchSettings();
       await ztteam_loadQueue(true);
     } catch (e: any) {
-      ztteam_showToast(e.response?.data?.message || 'Lỗi mở khóa Fanpage', 'error');
+      console.error('Error resolving checkpoint:', e);
+      ztteam_showToast(e.response?.data?.message || e.message || 'Lỗi mở khóa Fanpage', 'error');
     } finally {
       setIsResolvingCheckpoint(false);
     }
