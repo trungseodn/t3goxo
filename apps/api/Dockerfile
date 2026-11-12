@@ -59,7 +59,7 @@ COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
 
 # Cài đặt dependencies
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps && npm cache clean --force
 
 # Copy toàn bộ mã nguồn
 COPY . .

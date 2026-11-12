@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramService } from '../telegram/telegram.service';
-import { ztteam_getReelsPath, ztteam_getImagesPath } from '../common/ztteam_storage.util';
+import { ztteam_getReelsPath, ztteam_getImagesPath, ztteam_getSourceOriginalsPath } from '../common/ztteam_storage.util';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -64,12 +64,33 @@ export class ZTTeamStorageCleanupCron {
       }
 
       this.logger.log(`Cleanup complete. Deleted ${deletedReelsCount} old posted reels.`);
+
+      /** Cleanup raw crawled source images older than 3 days to protect disk space */
+      const sourceOriginalsDir = ztteam_getSourceOriginalsPath();
+      if (fs.existsSync(sourceOriginalsDir)) {
+        const sourceCutoff = Date.now() - 3 * 24 * 60 * 60 * 1000;
+        const files = fs.readdirSync(sourceOriginalsDir);
+        for (const file of files) {
+          try {
+            const filePath = path.join(sourceOriginalsDir, file);
+            const stats = fs.statSync(filePath);
+            if (stats.mtimeMs < sourceCutoff) {
+              fs.unlinkSync(filePath);
+              deletedImagesCount++;
+            }
+          } catch {}
+        }
+        if (deletedImagesCount > 0) {
+          this.logger.log(`Deleted ${deletedImagesCount} old raw source images from source-originals.`);
+        }
+      }
       
-      if (deletedReelsCount > 0) {
+      if (deletedReelsCount > 0 || deletedImagesCount > 0) {
         this.telegramService.ztteam_sendMessage(
           `🧹 *[DỌN DẸP Ổ CỨNG ĐỊNH KỲ]*\n\n` +
           `Đã xóa tự động các file video/audio cũ hơn ${retentionDays} ngày:\n` +
-          `• Video đã đăng: ${deletedReelsCount} bài`
+          `• Video đã đăng: ${deletedReelsCount} bài\n` +
+          (deletedImagesCount > 0 ? `• Ảnh nguồn đã xử lý: ${deletedImagesCount} file` : '')
         );
       }
 
