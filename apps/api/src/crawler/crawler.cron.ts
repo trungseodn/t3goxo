@@ -7,6 +7,7 @@ import { ZTTeamWordpressService } from '../wordpress/wordpress.service';
 import { ZTTeamCrawlerService } from './crawler.service';
 import Parser from 'rss-parser';
 import { TelegramService, ztteam_extractErrorMessage } from '../telegram/telegram.service';
+import { ztteam_isNewsSite } from '../common/ztteam_site_type.util';
 
 @Injectable()
 export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
@@ -252,11 +253,18 @@ export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
       where: { id: source.target_site_id },
       select: { wp_url: true }
     });
-    const isNewsSite = targetSiteObj?.wp_url && (
-      targetSiteObj.wp_url.includes('imsb.info') ||
-      targetSiteObj.wp_url.includes('mv.imsb.info')
-    );
-    const maxScanPages = isNewsSite ? 2 : 10; /** Website tin tức chỉ quét 1-2 trang mới nhất, không quét sâu vào bài cũ */
+    const isNewsSite = ztteam_isNewsSite(targetSiteObj?.wp_url);
+
+    /** Cấu hình số trang cào sâu tối đa: Mặc định 50 trang, tối đa 500 trang */
+    let configuredMaxPages = 50;
+    try {
+      const rules = JSON.parse(source.extract_rules_json || '{}');
+      if (rules.maxPages && Number(rules.maxPages) > 0) {
+        configuredMaxPages = Math.max(1, Math.min(500, parseInt(rules.maxPages, 10)));
+      }
+    } catch (e) {}
+
+    const maxScanPages = configuredMaxPages;
 
     for (let p = 1; p <= maxScanPages; p++) {
       const pageUrl = this.ztteam_generatePageUrl(source.source_url, p);
@@ -395,6 +403,20 @@ export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
         processedCount++;
         attemptCount++;
       } catch (err: any) {
+        /** ZTTeam: Kiểm tra nếu bài viết bị bỏ qua do KHÔNG PHẢI STORY (bài tin tức thông thường bị lẫn vào) */
+        const isNotStory = err.message?.includes('KHÔNG PHẢI STORY');
+        if (isNotStory) {
+          this.logger.log(`[TỰ ĐỘNG BỎ QUA - KHÔNG PHẢI STORY] Bỏ qua bài tin tức thông thường: ${url} (${err.message})`);
+          try {
+            await this.prisma.ztteam_crawl_history.upsert({
+              where: { source_id_url: { source_id: source.id, url } },
+              create: { source_id: source.id, url, status: 'SKIPPED_NOT_STORY' },
+              update: { status: 'SKIPPED_NOT_STORY' }
+            });
+          } catch (e) {}
+          continue; /** Chuyển sang URL tiếp theo, không gửi cảnh báo lỗi Telegram */
+        }
+
         /** ZTTeam: Kiểm tra nếu bài viết quá 5 ngày đối với website tin tức */
         const isTooOld = err.message?.includes('Bài viết quá cũ (> 5 ngày)');
         if (isTooOld) {

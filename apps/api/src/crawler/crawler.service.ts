@@ -6,8 +6,10 @@ import { ZTTeamFetcherService } from './fetcher.service';
 import { ZTTeamWordpressService } from '../wordpress/wordpress.service';
 import { ZTTeamStoryTestService } from '../story-test/story-test.service';
 import { ZTTeamHookVideoService } from '../media/hook-video.service';
+import { ZTTeamAIService } from '../ai/ai.service';
 import { ztteam_getImagesPath, ztteam_getStorageRoot } from '../common/ztteam_storage.util';
 import { ztteam_getNewsComment, ZTTEAM_NEWS_CAPTION_CTA } from '../common/ztteam_news_comment.util';
+import { ztteam_isNewsSite } from '../common/ztteam_site_type.util';
 
 @Injectable()
 export class ZTTeamCrawlerService {
@@ -18,6 +20,7 @@ export class ZTTeamCrawlerService {
     private readonly fetcherService: ZTTeamFetcherService,
     private readonly wordpressService: ZTTeamWordpressService,
     private readonly hookVideoService: ZTTeamHookVideoService,
+    private readonly aiService: ZTTeamAIService,
     @Inject(forwardRef(() => ZTTeamStoryTestService))
     private readonly storyTestService: ZTTeamStoryTestService,
   ) {}
@@ -89,10 +92,7 @@ export class ZTTeamCrawlerService {
       where: { id: targetSiteId },
       select: { wp_url: true }
     });
-    const isNewsSite = targetSiteObj?.wp_url && (
-      targetSiteObj.wp_url.includes('imsb.info') || 
-      targetSiteObj.wp_url.includes('mv.imsb.info')
-    );
+    const isNewsSite = ztteam_isNewsSite(targetSiteObj?.wp_url);
 
     if (isNewsSite && storyData.publishedDate) {
       const postAgeMs = Date.now() - new Date(storyData.publishedDate).getTime();
@@ -101,6 +101,32 @@ export class ZTTeamCrawlerService {
         this.logger.warn(`[NEWS GATEKEEPER] Bỏ qua bài viết cũ hơn 5 ngày (${postAgeDays.toFixed(1)} ngày từ ${new Date(storyData.publishedDate).toISOString()}): ${sourceUrl}`);
         throw new HttpException(`Bài viết quá cũ (> 5 ngày) đối với website tin tức`, HttpStatus.BAD_REQUEST);
       }
+    }
+
+    /** ZTTeam: Kiểm duyệt thể loại - Lọc bỏ bài tin tức không phải Story khi cào về website Story (như an.imsb.info) */
+    let shouldFilterNonStory = !isNewsSite; // Mặc định mọi website câu chuyện (an.imsb.info) đều bật lọc Story
+    if (params.sourceId) {
+      try {
+        const srcRec = await this.prisma.ztteam_crawl_sources.findUnique({
+          where: { id: params.sourceId },
+          select: { extract_rules_json: true }
+        });
+        if (srcRec?.extract_rules_json) {
+          const r = JSON.parse(srcRec.extract_rules_json);
+          if (r.onlyStory !== undefined) {
+            shouldFilterNonStory = Boolean(r.onlyStory);
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (shouldFilterNonStory) {
+      const storyCheck = await this.aiService.ztteam_classifyIsStory(storyTitle, cleanContent, sourceUrl);
+      if (!storyCheck.isStory) {
+        this.logger.warn(`[STORY GATEKEEPER] Bỏ qua bài viết không phải Story (${storyCheck.reason}): ${sourceUrl} - "${storyTitle}"`);
+        throw new HttpException(`[BỎ QUA - KHÔNG PHẢI STORY] ${storyCheck.reason}`, HttpStatus.BAD_REQUEST);
+      }
+      this.logger.log(`[STORY GATEKEEPER] Xác nhận bài viết hợp lệ là Story: "${storyTitle}" (${storyCheck.reason})`);
     }
 
     /** 1.1 Tải và lưu trữ ảnh gốc từ website nguồn vào ổ cứng VPS làm bản dự phòng an toàn */
@@ -501,12 +527,14 @@ export class ZTTeamCrawlerService {
     };
   }
 
-  async ztteam_createSource(siteId: string, data: { sourceUrl: string; sourceCategory: string; frequencyCron: string; addLinkToComment?: boolean; batchSize?: number; keepContentImages?: boolean }) {
+  async ztteam_createSource(siteId: string, data: { sourceUrl: string; sourceCategory: string; frequencyCron: string; addLinkToComment?: boolean; batchSize?: number; keepContentImages?: boolean; maxPages?: number; onlyStory?: boolean }) {
     try {
       const extractRules = {
         addLinkToComment: data.addLinkToComment !== undefined ? data.addLinkToComment : true,
         batchSize: data.batchSize ? Math.max(1, Math.min(10, Number(data.batchSize))) : 1,
         keepContentImages: data.keepContentImages !== undefined ? Boolean(data.keepContentImages) : true,
+        maxPages: data.maxPages ? Math.max(1, Math.min(500, Number(data.maxPages))) : 50,
+        onlyStory: data.onlyStory !== undefined ? Boolean(data.onlyStory) : undefined,
       };
       return await this.prisma.ztteam_crawl_sources.create({
         data: {
@@ -524,7 +552,7 @@ export class ZTTeamCrawlerService {
     }
   }
 
-  async ztteam_updateSource(sourceId: string, data: { sourceUrl: string; sourceCategory: string; frequencyCron: string; addLinkToComment?: boolean; batchSize?: number; keepContentImages?: boolean }) {
+  async ztteam_updateSource(sourceId: string, data: { sourceUrl: string; sourceCategory: string; frequencyCron: string; addLinkToComment?: boolean; batchSize?: number; keepContentImages?: boolean; maxPages?: number; onlyStory?: boolean }) {
     const existing = await this.prisma.ztteam_crawl_sources.findUnique({ where: { id: sourceId } });
     let extractRules: any = {};
     try {
@@ -542,6 +570,12 @@ export class ZTTeamCrawlerService {
     }
     if (data.keepContentImages !== undefined) {
       extractRules.keepContentImages = Boolean(data.keepContentImages);
+    }
+    if (data.maxPages !== undefined) {
+      extractRules.maxPages = Math.max(1, Math.min(500, Number(data.maxPages)));
+    }
+    if (data.onlyStory !== undefined) {
+      extractRules.onlyStory = Boolean(data.onlyStory);
     }
 
     return this.prisma.ztteam_crawl_sources.update({

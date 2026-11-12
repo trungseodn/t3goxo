@@ -357,6 +357,126 @@ BẮT BUỘC TRẢ VỀ DẠNG KẾT QUẢ ĐÚNG THEO ĐỊNH DẠNG JSON SAU (
   }
 
   /**
+   * ZTTeam: Kiểm định chất lượng thể loại bài viết - Story vs Tin tức / Báo cáo / Hướng dẫn
+   * Tự động bỏ qua bài tin tức thông thường khi cào dữ liệu cho các website câu chuyện (như an.imsb.info).
+   */
+  async ztteam_classifyIsStory(
+    title: string,
+    content: string,
+    url?: string
+  ): Promise<{ isStory: boolean; reason: string }> {
+    const titleClean = (title || '').trim();
+    const titleLower = titleClean.toLowerCase();
+    const urlLower = (url || '').toLowerCase();
+
+    // 1. Stage 1: Fast Rule-Based Regex Filter (0ms)
+    // Bắt các trường hợp điển hình 100% không phải story: Thu hồi sản phẩm, cảnh báo FDA, luật pháp, kiện tụng, bí quyết/hướng dẫn
+    const nonStoryPatterns: Array<{ regex: RegExp; desc: string }> = [
+      { regex: /\brecall(?:s|ed)?\b/i, desc: 'Tin tức thu hồi sản phẩm (Recall)' },
+      { regex: /\b(?:salmonella|listeria|e\.?\s*coli|avian\s*flu|bird\s*flu|rabies\s*outbreak)\b/i, desc: 'Cảnh báo y tế / bùng phát dịch bệnh' },
+      { regex: /\b(?:fda|usda|cdc)\s+(?:warns?|warning|alert|announces?|advises?)\b/i, desc: 'Cảnh báo chính thức từ cơ quan FDA/USDA/CDC' },
+      { regex: /\b(?:lawsuit|sues|sued|court\s+rules|judge\s+orders?)\b/i, desc: 'Tin tức kiện tụng / pháp đình' },
+      { regex: /\b(?:arrested|arrests?|police\s+investigat\w*|sheriff|felony|misdemeanor|charged\s+with)\b/i, desc: 'Bản tin an ninh / bắt giữ tội phạm' },
+      { regex: /\b(?:passes\s+bill|legislation|signed\s+into\s+law|ordinance\s+passed|senate\s+votes?)\b/i, desc: 'Tin tức chính sách / điều luật mới' },
+      { regex: /\b(?:how\s+to\s+(?:train|clean|prevent|stop|care|choose|spot|identify|treat))\b/i, desc: 'Bài viết cẩm nang hướng dẫn (How-to guide)' },
+      { regex: /\b(?:best\s+(?:dog|cat|pet)\s+food|top\s+\d+\s+(?:tips|ways|products|reasons|breeds))\b/i, desc: 'Bài viết danh sách / review sản phẩm (Listicle)' },
+      { regex: /\b(?:foods?\s+your\s+(?:dog|cat)\s+should\s+never\s+eat|symptoms\s+of\s+\w+\s+in\s+pets)\b/i, desc: 'Cẩm nang dinh dưỡng / thú y tổng quát' },
+      { regex: /\b(?:study\s+(?:finds|shows|reveals|suggests)|researchers?\s+(?:find|discover)|survey\s+reveals?)\b/i, desc: 'Báo cáo khảo sát / nghiên cứu khoa học' },
+      { regex: /\b(?:quarterly\s+results|q[1-4]\s+earnings|stocks?\s+rise|market\s+share|price\s+increase)\b/i, desc: 'Bản tin tài chính / thị trường' },
+    ];
+
+    for (const item of nonStoryPatterns) {
+      if (item.regex.test(titleLower) || item.regex.test(urlLower)) {
+        this.logger.log(`[STORY FILTER] Loại trừ bài không phải story theo mẫu quy tắc "${item.desc}": "${titleClean}"`);
+        return { isStory: false, reason: item.desc };
+      }
+    }
+
+    // 2. Stage 2: AI Classification via Gemini / OpenAI / DeepSeek
+    const settings = await this.getSettings();
+    if (!settings.openaiKey && !settings.deepseekKey && !settings.geminiKey) {
+      this.logger.log(`[STORY FILTER] Không có API key AI, thông qua sau khi vượt qua Stage 1: "${titleClean}"`);
+      return { isStory: true, reason: 'Passed Stage 1 heuristic check' };
+    }
+
+    const systemPrompt = `You are an editorial gatekeeper for a viral emotional story magazine (like The Dodo, Love Meow, Heroic Dog Stories, Human Interest Stories).
+Your job is to determine whether the submitted article is a genuine narrative STORY or a standard NEWS/INFORMATIONAL article.
+
+CLASSIFICATION RULES:
+- TRUE STORY (isStory: true):
+  * Focuses on a specific character, animal, hero, rescuer, or family narrative.
+  * Contains an emotional or dramatic story arc (rescue, abandonment, miraculous recovery, reunion, unexpected friendship, selfless adoption, loyalty).
+  * Narrated chronologically with personal focus ("When Sarah first saw him in the rain...", "Barnaby was shivering in the cold...").
+
+- NOT A STORY (isStory: false):
+  * Factual news, breaking news, press releases, reports on crimes/police/arrests.
+  * Food or product recalls, FDA/CDC health alerts, contamination notices.
+  * Laws, bills, local ordinances, government policies, politics.
+  * Informational tips, listicles ("Top 10..."), veterinarian advice, training guides, how-to articles.
+  * Financial reports, corporate earnings, industry statistics.
+  * Generic pet facts or trivia without an individual character arc.
+
+Return JSON strictly:
+{
+  "isStory": boolean,
+  "reason": "short explanation under 15 words"
+}`;
+
+    const snippet = content.substring(0, 1500).replace(/\s+/g, ' ').trim();
+    const userPrompt = `Title: ${titleClean}\nURL: ${url || 'N/A'}\nContent snippet:\n${snippet}`;
+
+    try {
+      if (settings.activeProvider === 'gemini' && settings.geminiKey) {
+        const text = await this.ztteam_callGeminiWithFallback(
+          settings.geminiKey,
+          `${systemPrompt}\n\n${userPrompt}`,
+          { jsonMode: true, temperature: 0.1, maxTokens: 250 }
+        );
+        const jsonResult = this.ztteam_safeParseJson(text);
+        const isStory = jsonResult.isStory !== false;
+        return {
+          isStory,
+          reason: jsonResult.reason || (isStory ? 'Story narrative confirmed' : 'Non-story detected')
+        };
+      } else {
+        const OpenAI = require('openai').default;
+        const isDeepseek = settings.activeProvider === 'deepseek' && settings.deepseekKey;
+        const rawKey = isDeepseek ? settings.deepseekKey : settings.openaiKey;
+        const apiKey = (rawKey || '').trim();
+        const baseURL = isDeepseek ? 'https://api.deepseek.com' : undefined;
+        const modelName = isDeepseek ? 'deepseek-chat' : 'gpt-4o-mini';
+
+        if (!apiKey) {
+          return { isStory: true, reason: 'No AI key available for fallback' };
+        }
+
+        const openai = new OpenAI({ apiKey, baseURL });
+        const response = await openai.chat.completions.create({
+          model: modelName,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          max_tokens: 250,
+          temperature: 0.1,
+        });
+
+        const resultString = response.choices[0]?.message?.content?.trim() || '{}';
+        const jsonResult = this.ztteam_safeParseJson(resultString);
+        const isStory = jsonResult.isStory !== false;
+        return {
+          isStory,
+          reason: jsonResult.reason || (isStory ? 'Story narrative confirmed' : 'Non-story detected')
+        };
+      }
+    } catch (aiErr: any) {
+      this.logger.warn(`AI story classification error (${aiErr.message}), defaulting to true to avoid halting crawler.`);
+      return { isStory: true, reason: 'AI classification fallback pass' };
+    }
+  }
+
+  /**
    * Generate subtitles with precise timing synchronization.
    * Uses smart chunking (breaks on punctuation like commas and periods)
    * and calculates sentence durations using speech pause weights to match natural TTS audio timing.

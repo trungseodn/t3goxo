@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ZTTeamHtmlCleanerService } from './html-cleaner.service';
 import { ztteam_getStorageRoot } from '../common/ztteam_storage.util';
+import { ztteam_isNewsSite } from '../common/ztteam_site_type.util';
 
 @Injectable()
 export class ZTTeamWordpressService {
@@ -511,8 +512,9 @@ export class ZTTeamWordpressService {
       if (categoryId) params.categories = categoryId;
       if (targetTags) params.tags = targetTags;
 
-      // ZTTeam: Website tin tức (imsb.info, mv.imsb.info) chỉ lấy bài viết mới nhất trong vòng 5 ngày
-      if (wpUrl.includes('imsb.info') || wpUrl.includes('mv.imsb.info')) {
+      // ZTTeam: Website tin tức (imsb.info, mv.imsb.info) chỉ lấy bài viết mới nhất trong vòng 5 ngày.
+      // an.imsb.info là trang story, không áp dụng giới hạn 5 ngày.
+      if (ztteam_isNewsSite(wpUrl)) {
         params.after = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
       }
 

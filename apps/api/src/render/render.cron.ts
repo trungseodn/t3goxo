@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ZTTeamRenderProcessor } from './render.processor';
 import { ZTTeamWordpressService } from '../wordpress/wordpress.service';
 import { ZTTeamHookVideoService } from '../media/hook-video.service';
+import { ztteam_isNewsSite } from '../common/ztteam_site_type.util';
 
 @Injectable()
 export class ZTTeamRenderCron implements OnApplicationBootstrap {
@@ -142,10 +143,7 @@ export class ZTTeamRenderCron implements OnApplicationBootstrap {
           where: { id: source.target_site_id },
           select: { wp_url: true }
         });
-        const isNewsSite = targetSite?.wp_url && (
-          targetSite.wp_url.includes('imsb.info') || 
-          targetSite.wp_url.includes('mv.imsb.info')
-        );
+        const isNewsSite = ztteam_isNewsSite(targetSite?.wp_url);
         const effectiveMaxAgeDays = isNewsSite ? Math.min(maxAgeDays, 5) : maxAgeDays;
 
         /** Get latest posts from the target site */

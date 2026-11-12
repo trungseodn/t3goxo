@@ -50,6 +50,8 @@ export default function WordPressSites() {
   const [sourceCategory, setSourceCategory] = useState('');
   const [frequencyCron, setFrequencyCron] = useState('0 */6 * * *');
   const [batchSize, setBatchSize] = useState<number>(1);
+  const [maxPages, setMaxPages] = useState<number>(50);
+  const [onlyStory, setOnlyStory] = useState<boolean>(true);
   const [keepContentImages, setKeepContentImages] = useState(true);
 
   /** Fanpages state */
@@ -209,6 +211,8 @@ export default function WordPressSites() {
     setSourceCategory('');
     setFrequencyCron('0 */6 * * *');
     setBatchSize(1);
+    setMaxPages(50);
+    setOnlyStory(true);
     setKeepContentImages(true);
   };
 
@@ -221,9 +225,13 @@ export default function WordPressSites() {
     try {
       const rules = JSON.parse(source.extract_rules_json || '{}');
       setBatchSize(rules.batchSize ? Number(rules.batchSize) : 1);
+      setMaxPages(rules.maxPages ? Number(rules.maxPages) : 50);
+      setOnlyStory(rules.onlyStory !== undefined ? Boolean(rules.onlyStory) : true);
       setKeepContentImages(rules.keepContentImages !== false);
     } catch (e) {
       setBatchSize(1);
+      setMaxPages(50);
+      setOnlyStory(true);
       setKeepContentImages(true);
     }
   };
@@ -232,14 +240,14 @@ export default function WordPressSites() {
     e.preventDefault();
     try {
       if (editingSourceId) {
-        await ztteam_updateSource(editingSourceId, { sourceUrl, sourceCategory, frequencyCron, batchSize, keepContentImages });
+        await ztteam_updateSource(editingSourceId, { sourceUrl, sourceCategory, frequencyCron, batchSize, keepContentImages, maxPages, onlyStory });
         ztteam_showToast('Cập nhật website nguồn thành công', 'success');
       } else {
         const urls = sourceUrl.split('\n').map(u => u.trim()).filter(u => u);
         let successCount = 0;
         for (const url of urls) {
           try {
-            await ztteam_createSource(siteId, { sourceUrl: url, sourceCategory, frequencyCron, batchSize, keepContentImages });
+            await ztteam_createSource(siteId, { sourceUrl: url, sourceCategory, frequencyCron, batchSize, keepContentImages, maxPages, onlyStory });
             successCount++;
           } catch (e) {
             console.error(`Failed to add source ${url}`, e);
@@ -629,7 +637,18 @@ export default function WordPressSites() {
                         </h5>
                         <div className="flex items-center gap-3">
                           <button
-                            onClick={() => { setShowSourceForm(site.id); setEditingSourceId(null); setSourceUrl(''); setSourceCategory(''); setFrequencyCron('0 */6 * * *'); setBatchSize(1); setKeepContentImages(true); }}
+                            onClick={() => {
+                              setShowSourceForm(site.id);
+                              setEditingSourceId(null);
+                              setSourceUrl('');
+                              setSourceCategory('');
+                              setFrequencyCron('0 */6 * * *');
+                              setBatchSize(1);
+                              setMaxPages(50);
+                              const isNews = site.wp_url && (site.wp_url.includes('imsb.info') || site.wp_url.includes('mv.imsb.info')) && !site.wp_url.includes('an.imsb.info');
+                              setOnlyStory(!isNews);
+                              setKeepContentImages(true);
+                            }}
                             className="text-cyan-400 hover:text-cyan-300 text-xs font-bold flex items-center gap-1 uppercase tracking-wide"
                           >
                             <span className="material-symbols-outlined text-base">add_circle</span>
@@ -697,6 +716,37 @@ export default function WordPressSites() {
                                   required
                                 />
                                 <p className="mt-1.5 text-[11px] text-fb-text-muted">Khuyên dùng 1 bài để tiết kiệm API AI và tránh quá tải.</p>
+                              </div>
+                              <div>
+                                <label className="text-xs font-bold text-fb-text-muted mb-1.5 block uppercase tracking-wider">Cào sâu tối đa (1 - 500 trang)</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={500}
+                                  value={maxPages}
+                                  onChange={(e) => setMaxPages(Math.max(1, Math.min(500, parseInt(e.target.value) || 50)))}
+                                  className="w-full py-2.5 px-4 rounded-full bg-fb-surface text-fb-text text-xs placeholder:text-fb-text-muted/60 focus:outline-none focus:ring-2 focus:ring-fb-blue"
+                                  required
+                                />
+                                <p className="mt-1.5 text-[11px] text-fb-text-muted">Mặc định 50 trang. Quét sâu ngược về các trang cũ khi trang mới đã cào hết.</p>
+                              </div>
+
+                              <div className="md:col-span-2">
+                                <label className="flex items-center justify-between p-3.5 bg-fb-surface rounded-2xl cursor-pointer border border-white/5">
+                                  <div>
+                                    <span className="text-xs font-bold text-fb-text block">Chỉ lấy bài Story (Bỏ qua tin tức/cảnh báo)</span>
+                                    <span className="text-[11px] text-fb-text-muted block mt-0.5">Tự động phát hiện và bỏ qua các bài tin tức thông thường (tin thời sự, thu hồi sản phẩm, pháp luật, tips hướng dẫn...), chỉ lấy các câu chuyện narrative có diễn biến nhân vật & cảm xúc.</span>
+                                  </div>
+                                  <div className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={onlyStory}
+                                      onChange={(e) => setOnlyStory(e.target.checked)}
+                                      className="sr-only peer"
+                                    />
+                                    <div className="w-9 h-5 bg-fb-surface-hover peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                  </div>
+                                </label>
                               </div>
 
                               <div className="md:col-span-2">
@@ -788,6 +838,29 @@ export default function WordPressSites() {
                                         return r.batchSize || 1;
                                       } catch (e) { return 1; }
                                     })()} bài
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-[9px] text-fb-text-muted uppercase tracking-wider font-extrabold block">CÀO SÂU</span>
+                                  <span className="font-bold text-sky-400 truncate block">
+                                    {(() => {
+                                      try {
+                                        const r = JSON.parse(source.extract_rules_json || '{}');
+                                        return r.maxPages || 50;
+                                      } catch (e) { return 50; }
+                                    })()} trang
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-[9px] text-fb-text-muted uppercase tracking-wider font-extrabold block">BỘ LỌC STORY</span>
+                                  <span className="font-bold truncate block">
+                                    {(() => {
+                                      try {
+                                        const r = JSON.parse(source.extract_rules_json || '{}');
+                                        if (r.onlyStory === false) return <span className="text-fb-text-muted">Tất cả bài</span>;
+                                        return <span className="text-emerald-400 font-semibold">Chỉ Story</span>;
+                                      } catch (e) { return <span className="text-emerald-400 font-semibold">Chỉ Story</span>; }
+                                    })()}
                                   </span>
                                 </div>
                                 <div>
@@ -979,14 +1052,46 @@ export default function WordPressSites() {
                             </a>
                           </td>
                           <td className="py-3 px-3 text-center">
-                            <span className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
-                              item.status === 'SUCCESS' ? 'text-emerald-400 bg-emerald-500/15' : 'text-red-400 bg-red-500/15'
-                            }`}>
-                              <span className="material-symbols-outlined text-xs">
-                                {item.status === 'SUCCESS' ? 'check_circle' : 'error'}
-                              </span>
-                              {item.status === 'SUCCESS' ? 'Thành công' : 'Thất bại'}
-                            </span>
+                            {(() => {
+                              if (item.status === 'SUCCESS') {
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full text-emerald-400 bg-emerald-500/15">
+                                    <span className="material-symbols-outlined text-xs">check_circle</span>
+                                    Thành công
+                                  </span>
+                                );
+                              }
+                              if (item.status === 'SKIPPED_NOT_STORY') {
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full text-amber-400 bg-amber-500/15" title="Bỏ qua vì là tin tức thông thường, không phải story">
+                                    <span className="material-symbols-outlined text-xs">filter_alt</span>
+                                    Bỏ qua (Tin tức)
+                                  </span>
+                                );
+                              }
+                              if (item.status === 'SKIPPED_TOO_OLD') {
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full text-sky-400 bg-sky-500/15" title="Bỏ qua vì bài viết cũ hơn 5 ngày">
+                                    <span className="material-symbols-outlined text-xs">history_toggle_off</span>
+                                    Bỏ qua (&gt; 5 ngày)
+                                  </span>
+                                );
+                              }
+                              if (item.status === 'SKIPPED_NOT_ARTICLE') {
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full text-slate-400 bg-slate-500/15" title="Không phải bài viết hợp lệ">
+                                    <span className="material-symbols-outlined text-xs">do_not_disturb</span>
+                                    Bỏ qua (Trang rác)
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full text-red-400 bg-red-500/15">
+                                  <span className="material-symbols-outlined text-xs">error</span>
+                                  Thất bại
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="py-3 px-3 text-right text-fb-text-muted text-xs">
                             {new Date(item.created_at).toLocaleString('vi-VN')}

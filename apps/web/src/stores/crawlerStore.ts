@@ -40,8 +40,8 @@ interface CrawlerState {
   isLoading: boolean;
   error: string | null;
   ztteam_fetchSources: (siteId: string) => Promise<void>;
-  ztteam_createSource: (siteId: string, data: { sourceUrl: string; sourceCategory: string; frequencyCron: string; addLinkToComment?: boolean; batchSize?: number; keepContentImages?: boolean }) => Promise<void>;
-  ztteam_updateSource: (sourceId: string, data: { sourceUrl: string; sourceCategory: string; frequencyCron: string; addLinkToComment?: boolean; batchSize?: number; keepContentImages?: boolean }) => Promise<void>;
+  ztteam_createSource: (siteId: string, data: { sourceUrl: string; sourceCategory: string; frequencyCron: string; addLinkToComment?: boolean; batchSize?: number; keepContentImages?: boolean; maxPages?: number; onlyStory?: boolean }) => Promise<void>;
+  ztteam_updateSource: (sourceId: string, data: { sourceUrl: string; sourceCategory: string; frequencyCron: string; addLinkToComment?: boolean; batchSize?: number; keepContentImages?: boolean; maxPages?: number; onlyStory?: boolean }) => Promise<void>;
   ztteam_deleteSource: (sourceId: string) => Promise<void>;
   ztteam_toggleSource: (sourceId: string, enabled: boolean) => Promise<void>;
   ztteam_testScrape: (url: string) => Promise<any>;
