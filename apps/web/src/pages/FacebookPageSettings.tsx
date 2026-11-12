@@ -339,6 +339,8 @@ export default function FacebookPageSettings() {
     }
   };
 
+  const [isResolvingCheckpoint, setIsResolvingCheckpoint] = useState(false);
+
   /** Save Settings */
   const ztteam_handleSave = async () => {
     try {
@@ -362,10 +364,32 @@ export default function FacebookPageSettings() {
         sources
       });
       ztteam_showToast('Đã lưu cấu hình thành công', 'success');
+      if (autoPublishEnabled) {
+        setIsCheckpointBlocked(false);
+      }
+      await ztteam_loadSettings();
+      await ztteam_loadQueue(true);
     } catch (error: any) {
       ztteam_showToast(error.response?.data?.message || 'Lỗi lưu cấu hình', 'error');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  /** Xác nhận mở khóa checkpoint sau khi đã xác minh danh tính trên điện thoại */
+  const ztteam_handleResolveCheckpoint = async () => {
+    try {
+      setIsResolvingCheckpoint(true);
+      const res = await api.post(`/facebook/pages/${id}/resolve-checkpoint`);
+      ztteam_showToast(res.data?.message || 'Đã mở khóa Fanpage thành công', 'success');
+      setAutoPublishEnabled(true);
+      setIsCheckpointBlocked(false);
+      await ztteam_loadSettings();
+      await ztteam_loadQueue(true);
+    } catch (e: any) {
+      ztteam_showToast(e.response?.data?.message || 'Lỗi mở khóa Fanpage', 'error');
+    } finally {
+      setIsResolvingCheckpoint(false);
     }
   };
 
@@ -792,8 +816,17 @@ export default function FacebookPageSettings() {
                   <ol className="list-decimal list-inside text-[11px] text-amber-300 space-y-1 bg-black/30 p-2.5 rounded-lg border border-amber-500/20 font-medium">
                     <li>Mở app Facebook trên điện thoại Admin ➔ Chuyển sang Page <b>{pageName}</b></li>
                     <li>Đăng thử 1 bài viết ("Test") ➔ Hoàn tất thông báo xác nhận danh tính trên điện thoại</li>
-                    <li>Quay lại đây, gạt bật lại nút <b>"Tự động đăng"</b> ở trên và bấm <b>Lưu cài đặt</b></li>
+                    <li>Sau khi đăng được, bấm nút <b>"Xác nhận mở khóa ngay"</b> bên dưới</li>
                   </ol>
+                  <button
+                    type="button"
+                    disabled={isResolvingCheckpoint}
+                    onClick={ztteam_handleResolveCheckpoint}
+                    className="w-full mt-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <span className="material-symbols-outlined text-base">verified</span>
+                    <span>{isResolvingCheckpoint ? 'Đang mở khóa...' : 'Tôi đã xác minh trên điện thoại — Xác nhận mở khóa ngay'}</span>
+                  </button>
                 </div>
               )}
 

@@ -945,8 +945,36 @@ export class ZTTeamFacebookService {
     };
 
     /** ZTTeam: Nếu người dùng bật lại tự động đăng, khôi phục token_status về active để xóa cảnh báo */
-    if (config.auto_publish_enabled === true && page.token_status === 'checkpoint_required') {
+    if (config.auto_publish_enabled === true) {
       updateData.token_status = 'active';
+
+      /** Xóa trạng thái checkpoint của các bài viết lỗi 4854002 trước đó và đưa về hàng chờ COMPLETED để đăng tiếp */
+      await Promise.all([
+        this.prisma.ztteam_images.updateMany({
+          where: {
+            page_id: page.id,
+            is_posted: false,
+            error_log: { contains: '4854002' }
+          },
+          data: {
+            status: 'COMPLETED',
+            error_log: null,
+            post_retry_count: 0
+          }
+        }),
+        this.prisma.ztteam_reels.updateMany({
+          where: {
+            page_id: page.id,
+            is_posted: false,
+            error_log: { contains: '4854002' }
+          },
+          data: {
+            status: 'COMPLETED',
+            error_log: null,
+            post_retry_count: 0
+          }
+        })
+      ]).catch(() => {});
     }
 
     await this.prisma.ztteam_pages.update({
@@ -994,6 +1022,64 @@ export class ZTTeamFacebookService {
     }
 
     return { success: true };
+  }
+
+  /**
+   * ZTTeam: Xác nhận mở khóa Fanpage sau khi Admin đã xác minh danh tính trên điện thoại
+   */
+  async ztteam_resolveCheckpoint(pageId: string, userId: string) {
+    const page = await this.prisma.ztteam_pages.findFirst({
+      where: {
+        OR: [{ fb_page_id: pageId }, { id: pageId }]
+      },
+      include: { fb_account: true }
+    });
+
+    if (!page || page.fb_account.owner_user_id !== userId) {
+      throw new BadRequestException('Fanpage không tồn tại hoặc bạn không có quyền truy cập');
+    }
+
+    /** Khôi phục trạng thái hoạt động và bật tự động đăng */
+    await this.prisma.ztteam_pages.update({
+      where: { id: page.id },
+      data: {
+        token_status: 'active',
+        auto_publish_enabled: true
+      }
+    });
+
+    /** Reset tất cả bài viết lỗi 4854002 chưa đăng về COMPLETED để sẵn sàng xuất bản */
+    await Promise.all([
+      this.prisma.ztteam_images.updateMany({
+        where: {
+          page_id: page.id,
+          is_posted: false,
+          error_log: { contains: '4854002' }
+        },
+        data: {
+          status: 'COMPLETED',
+          error_log: null,
+          post_retry_count: 0
+        }
+      }),
+      this.prisma.ztteam_reels.updateMany({
+        where: {
+          page_id: page.id,
+          is_posted: false,
+          error_log: { contains: '4854002' }
+        },
+        data: {
+          status: 'COMPLETED',
+          error_log: null,
+          post_retry_count: 0
+        }
+      })
+    ]).catch(() => {});
+
+    return {
+      success: true,
+      message: `Đã mở khóa Fanpage "${page.name}" thành công! Hệ thống đã kích hoạt lại chế độ tự động đăng bài.`
+    };
   }
 
   /**

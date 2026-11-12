@@ -303,9 +303,17 @@ function FanpageCard({ page, isExpired, testingPageId, handleTestPost, handleTog
             <span className="material-symbols-outlined text-xs">error</span> Page Die / Lỗi Token
           </span>
         ) : page.isCheckpointBlocked ? (
-          <span className="px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded-full text-[10px] font-extrabold shrink-0 flex items-center gap-1 shadow-sm border border-amber-500/30">
-            <span className="material-symbols-outlined text-xs text-amber-400">shield_lock</span> Chờ xác minh
-          </span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleResolveCheckpoint(page.internalId || page.id, page.name);
+            }}
+            title="Bấm để xác nhận mở khóa sau khi đã xác minh danh tính trên điện thoại"
+            className="px-2.5 py-1 bg-amber-500/20 hover:bg-emerald-500/25 text-amber-300 hover:text-emerald-300 rounded-full text-[10px] font-extrabold shrink-0 flex items-center gap-1 shadow-sm border border-amber-500/30 hover:border-emerald-500/40 transition-all cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-xs text-amber-400">shield_lock</span>
+            <span>Chờ xác minh (Mở khóa)</span>
+          </button>
         ) : (
           <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-400 rounded-full text-[10px] font-extrabold shrink-0 flex items-center gap-1 shadow-sm">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0 animate-pulse"></span> Active
@@ -975,6 +983,22 @@ export default function FacebookPages() {
       }
     } catch (e: any) {
       ztteam_showToast(e.response?.data?.message || 'Có lỗi xảy ra', 'error');
+    }
+  };
+
+  const handleResolveCheckpoint = async (pageId: string, pageName: string) => {
+    const confirm = await ztteam_showConfirm(
+      'Mở khóa Fanpage',
+      `Bạn đã hoàn tất xác nhận danh tính trên điện thoại cho Fanpage "${pageName}"? Hệ thống sẽ gỡ cảnh báo và kích hoạt lại tự động đăng bài.`
+    );
+    if (!confirm) return;
+
+    try {
+      const res = await api.post(`/facebook/pages/${pageId}/resolve-checkpoint`);
+      ztteam_showToast(res.data?.message || 'Đã mở khóa Fanpage thành công', 'success');
+      await ztteam_fetchPagesFromDB();
+    } catch (e: any) {
+      ztteam_showToast(e.response?.data?.message || 'Lỗi mở khóa Fanpage', 'error');
     }
   };
 
