@@ -77,25 +77,20 @@ export class ZTTeamDashboardService {
     ]);
     const totalReelsPublished = reelsPublished + imagesPublished;
 
-    const [reelsFailed, imagesFailed] = await Promise.all([
-      this.prisma.ztteam_reels.count({
-        where: { page_id: { in: pageIds }, status: 'FAILED', is_posted: false },
-      }),
-      this.prisma.ztteam_images.count({
-        where: {
-          page_id: { in: pageIds },
-          is_posted: false,
-          OR: [
-            { video_status: 'FAILED' },
-            {
-              status: 'FAILED',
-              video_status: { notIn: ['PENDING', 'PROCESSING', 'COMPLETED'] }
-            }
-          ]
-        },
-      }),
-    ]);
-    const totalFailed = reelsFailed + imagesFailed;
+    const imagesFailed = await this.prisma.ztteam_images.count({
+      where: {
+        page_id: { in: pageIds },
+        is_posted: false,
+        OR: [
+          { video_status: 'FAILED' },
+          {
+            status: 'FAILED',
+            video_status: { notIn: ['PENDING', 'PROCESSING', 'COMPLETED'] }
+          }
+        ]
+      },
+    });
+    const totalFailed = imagesFailed;
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -137,26 +132,21 @@ export class ZTTeamDashboardService {
     
     const startOfDay = new Date();
     startOfDay.setHours(0,0,0,0);
-    const [failedReelsToday, failedImagesToday] = await Promise.all([
-      this.prisma.ztteam_reels.count({
-        where: { page_id: { in: pageIds }, status: 'FAILED', is_posted: false, updated_at: { gte: startOfDay } }
-      }),
-      this.prisma.ztteam_images.count({
-        where: {
-          page_id: { in: pageIds },
-          is_posted: false,
-          OR: [
-            { video_status: 'FAILED' },
-            {
-              status: 'FAILED',
-              video_status: { notIn: ['PENDING', 'PROCESSING', 'COMPLETED'] }
-            }
-          ],
-          updated_at: { gte: startOfDay }
-        }
-      }),
-    ]);
-    const failedToday = failedReelsToday + failedImagesToday;
+    const failedImagesToday = await this.prisma.ztteam_images.count({
+      where: {
+        page_id: { in: pageIds },
+        is_posted: false,
+        OR: [
+          { video_status: 'FAILED' },
+          {
+            status: 'FAILED',
+            video_status: { notIn: ['PENDING', 'PROCESSING', 'COMPLETED'] }
+          }
+        ],
+        updated_at: { gte: startOfDay }
+      }
+    });
+    const failedToday = failedImagesToday;
 
     const alerts = [];
     if (expiredPages.length > 0) {

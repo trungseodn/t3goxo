@@ -44,9 +44,14 @@ export class ZTTeamRenderCron implements OnApplicationBootstrap {
       /** ZTTeam: Tự động quét và Render Hook Video 10s cho các bài viết CHƯA ĐĂNG đang ở trạng thái PENDING */
       await this.ztteam_autoRenderPendingVideos();
 
-      /** Find all pages that have auto create enabled and format is reel */
+      /** Find all pages that have auto create enabled and format is reel (chỉ áp dụng cho template reel cũ, không áp dụng cho hook_image/text_story) */
       const pages = await this.prisma.ztteam_pages.findMany({
-        where: { auto_create_enabled: true, is_active: true, post_format: { in: ['reel', 'mixed'] } },
+        where: {
+          auto_create_enabled: true,
+          is_active: true,
+          post_format: { in: ['reel', 'mixed'] },
+          video_engine: { notIn: ['hook_image', 'text_story'] }
+        },
         include: { sources: true },
         orderBy: { last_auto_scan_at: 'asc' },
         take: 50,
