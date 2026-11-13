@@ -79,7 +79,13 @@ export class ZTTeamPublisherCron {
         where: {
           status: 'COMPLETED',
           is_posted: false,
-          source_type: { not: 'TIKTOK_CLONE' }
+          source_type: { not: 'TIKTOK_CLONE' },
+          page: {
+            is_active: true,
+            auto_publish_enabled: true,
+            token_status: { notIn: ['expired', 'checkpoint_required', 'invalid'] },
+            fb_account: { status: 'active' }
+          }
         },
         include: { page: { include: { fb_account: true } } },
         orderBy: { created_at: 'asc' },
@@ -90,6 +96,12 @@ export class ZTTeamPublisherCron {
         where: {
           status: 'COMPLETED',
           is_posted: false,
+          page: {
+            is_active: true,
+            auto_publish_enabled: true,
+            token_status: { notIn: ['expired', 'checkpoint_required', 'invalid'] },
+            fb_account: { status: 'active' }
+          }
         },
         include: { page: { include: { fb_account: true } } },
         orderBy: { created_at: 'asc' },
@@ -118,6 +130,9 @@ export class ZTTeamPublisherCron {
       const eligibleCandidates: Array<{
         page: any;
         selectedItem: { type: 'reel_legacy' | 'image_reel' | 'image_only'; data: any };
+        isFixedScheduleActive: boolean;
+        activeSlotTimeMs: number;
+        slotDiffMinutes: number;
         diffMinutesFromLastPost: number;
         itemCreatedAt: number;
       }> = [];
@@ -128,6 +143,23 @@ export class ZTTeamPublisherCron {
         /** Nếu Page đang tắt tự động đăng bài hoặc bị vô hiệu hóa thì bỏ qua */
         if (auto_publish_enabled === false || page.is_active === false) {
           continue;
+        }
+
+        if (page.token_status && ['expired', 'checkpoint_required', 'invalid'].includes(page.token_status)) {
+          continue;
+        }
+
+        if (page.fb_account && page.fb_account.status !== 'active') {
+          continue;
+        }
+
+        if (page.token_status === 'rate_limited') {
+          const rateLimitCooldownMs = 60 * 60 * 1000;
+          const pageCheckedAt = page.last_checked ? new Date(page.last_checked).getTime() : 0;
+          if (now.getTime() - pageCheckedAt < rateLimitCooldownMs) {
+            this.logger.log(`Page ${page.name}: Đang trong thời gian cooldown bảo vệ do Facebook Rate Limit (60m). Bỏ qua nhịp này.`);
+            continue;
+          }
         }
 
         /** Lấy bài đăng thành công gần nhất của Page này để tính khoảng cách thời gian */
@@ -163,27 +195,36 @@ export class ZTTeamPublisherCron {
 
         const diffMinutesFromLastPost = lastPostTime ? Math.floor((now.getTime() - lastPostTime.getTime()) / 60000) : Infinity;
 
-        /** Kiểm tra xem gần đây (trong 5 phút) có bài nào bị FAILED hay không để tạm hoãn an toàn */
+        /** Kiểm tra xem gần đây (trong 10 phút) có bài nào bị FAILED hoặc đang retry hay không để tạm hoãn an toàn */
         const recentFailedReel = await this.prisma.ztteam_reels.findFirst({
           where: {
             page_id: pageId,
-            status: 'FAILED',
-            updated_at: { gte: new Date(now.getTime() - 5 * 60 * 1000) }
+            OR: [
+              { status: 'FAILED' },
+              { post_retry_count: { gt: 0 } }
+            ],
+            updated_at: { gte: new Date(now.getTime() - 10 * 60 * 1000) }
           }
         });
         const recentFailedImage = await this.prisma.ztteam_images.findFirst({
           where: {
             page_id: pageId,
-            status: 'FAILED',
-            updated_at: { gte: new Date(now.getTime() - 5 * 60 * 1000) }
+            OR: [
+              { status: 'FAILED' },
+              { post_retry_count: { gt: 0 } }
+            ],
+            updated_at: { gte: new Date(now.getTime() - 10 * 60 * 1000) }
           }
         });
         if (recentFailedReel || recentFailedImage) {
-          this.logger.log(`Page ${page.name}: Có bài đăng thất bại trong 5 phút qua. Tạm hoãn nhịp này để bảo vệ Page.`);
+          this.logger.log(`Page ${page.name}: Có bài đăng thất bại hoặc đang retry trong 10 phút qua. Tạm hoãn nhịp này để bảo vệ Page.`);
           continue;
         }
 
         let shouldPublish = false;
+        let isFixedScheduleActive = false;
+        let activeSlotTimeMs = 0;
+        let slotDiffMinutes = 0;
 
         if (schedule_mode === 'fixed') {
           if (schedule_fixed_times && Array.isArray(schedule_fixed_times) && schedule_fixed_times.length > 0) {
@@ -226,6 +267,9 @@ export class ZTTeamPublisherCron {
                 }
 
                 shouldPublish = true;
+                isFixedScheduleActive = true;
+                activeSlotTimeMs = slotTimeMs;
+                slotDiffMinutes = diffFromSlotMinutes;
                 break;
               }
             }
@@ -315,6 +359,9 @@ export class ZTTeamPublisherCron {
           eligibleCandidates.push({
             page,
             selectedItem,
+            isFixedScheduleActive,
+            activeSlotTimeMs,
+            slotDiffMinutes,
             diffMinutesFromLastPost,
             itemCreatedAt: new Date(itemDate).getTime(),
           });
@@ -328,11 +375,26 @@ export class ZTTeamPublisherCron {
       }
 
       /**
-       * ZTTeam: Thuật toán điều phối hàng đợi (Priority Dispatcher):
-       * 1. Ưu tiên Page nào lâu nhất chưa có bài đăng (diffMinutesFromLastPost giảm dần)
-       * 2. Nếu bằng nhau, ưu tiên bài viết được tạo sớm nhất (itemCreatedAt tăng dần)
+       * ZTTeam: Thuật toán điều phối hàng đợi thông minh (Smart Priority Dispatcher):
+       * 1. ƯU TIÊN TUYỆT ĐỐI cho Fanpage có lịch hẹn giờ cố định (Fixed Schedule) đến giờ đăng:
+       *    - Fanpage có slot giờ sớm hơn (đến giờ trước hoặc đang chờ) được xuất bản trước.
+       *    - Nếu cùng slot giờ (ví dụ 2 page cùng set 20:00), ưu tiên Page lâu chưa đăng hơn.
+       * 2. Các Fanpage chạy chế độ giãn cách (immediate / gap mode) sẽ được điều phối sau khi các lịch hẹn giờ đã được đáp ứng.
        */
       eligibleCandidates.sort((a, b) => {
+        // Tier 1: Fixed Schedule vs Immediate/Gap
+        if (a.isFixedScheduleActive && !b.isFixedScheduleActive) return -1;
+        if (!a.isFixedScheduleActive && b.isFixedScheduleActive) return 1;
+
+        // Cả 2 đều là Fixed Schedule:
+        if (a.isFixedScheduleActive && b.isFixedScheduleActive) {
+          if (a.activeSlotTimeMs !== b.activeSlotTimeMs) {
+            return a.activeSlotTimeMs - b.activeSlotTimeMs;
+          }
+          return b.diffMinutesFromLastPost - a.diffMinutesFromLastPost;
+        }
+
+        // Cả 2 đều là Immediate / Gap:
         if (b.diffMinutesFromLastPost !== a.diffMinutesFromLastPost) {
           return b.diffMinutesFromLastPost - a.diffMinutesFromLastPost;
         }
@@ -342,26 +404,27 @@ export class ZTTeamPublisherCron {
       this.logger.log(`[ZTTeam Global Dispatcher] Có ${eligibleCandidates.length} bài sẵn sàng xuất bản. Đang điều phối xử lý hàng đợi...`);
 
       /**
-       * ZTTeam: Điều phối xuất bản tối đa 2 Page mỗi chu kỳ 1 phút (giãn cách an toàn 15s giữa 2 Page)
+       * ZTTeam: Điều phối xuất bản tối đa 3 Page mỗi chu kỳ 1 phút (giãn cách an toàn 10s giữa các Page)
        * Giúp các Fanpage đến giờ đăng không bị ùn tắc trễ giờ mà vẫn an toàn tuyệt đối với Meta API.
        */
-      const BATCH_LIMIT = 2;
+      const BATCH_LIMIT = 3;
       const batch = eligibleCandidates.slice(0, BATCH_LIMIT);
 
       for (let i = 0; i < batch.length; i++) {
         const target = batch[i];
         const { selectedItem, page } = target;
 
-        /** Giãn cách an toàn toàn cục trước mỗi lần gọi Facebook API (ít nhất 15s) */
+        /** Giãn cách an toàn toàn cục trước mỗi lần gọi Facebook API (10s) */
         const elapsedSinceLastGlobal = Date.now() - this.ztteam_lastGlobalPublishTimestamp;
-        const MIN_GLOBAL_GAP_MS = 15000;
+        const MIN_GLOBAL_GAP_MS = 10000;
         if (this.ztteam_lastGlobalPublishTimestamp > 0 && elapsedSinceLastGlobal < MIN_GLOBAL_GAP_MS) {
           const waitMs = MIN_GLOBAL_GAP_MS - elapsedSinceLastGlobal;
           this.logger.log(`[ZTTeam Global Dispatcher] Giãn cách bảo vệ Meta: Chờ thêm ${Math.round(waitMs / 1000)}s trước khi gọi Facebook API...`);
           await new Promise(resolve => setTimeout(resolve, waitMs));
         }
 
-        this.logger.log(`[ZTTeam Global Dispatcher] Đang xuất bản (${i + 1}/${batch.length}) cho Page: ${page.name} (Đã chờ: ${target.diffMinutesFromLastPost === Infinity ? 'Mới/Vô cực' : target.diffMinutesFromLastPost + 'm'})`);
+        const modeStr = target.isFixedScheduleActive ? `Lịch hẹn giờ (${target.slotDiffMinutes}m trễ)` : 'Giãn cách (Immediate)';
+        this.logger.log(`[ZTTeam Global Dispatcher] Đang xuất bản (${i + 1}/${batch.length}) cho Page: ${page.name} [${modeStr}] (Đã chờ: ${target.diffMinutesFromLastPost === Infinity ? 'Mới/Vô cực' : target.diffMinutesFromLastPost + 'm'})`);
 
         if (selectedItem.type === 'reel_legacy') {
           await this.ztteam_publishReel(selectedItem.data, page);
@@ -477,24 +540,129 @@ export class ZTTeamPublisherCron {
         extractedError.includes('xác nhận danh tính') ||
         extractedError.includes('confirm your identity');
 
+      const isAppDeletedOrTokenExpired =
+        extractedError.includes('Code 190') ||
+        extractedError.includes('Application has been deleted') ||
+        extractedError.includes('Session has expired') ||
+        extractedError.includes('Error validating access token');
+
+      const isPermissionDenied =
+        extractedError.includes('(#200)') ||
+        extractedError.includes('Subject does not have permission');
+
+      const isRateLimited =
+        extractedError.includes('1390008') ||
+        extractedError.includes('We limit how often you can post') ||
+        extractedError.includes('Code 368');
+
       let currentRetries = (reel.post_retry_count || 0) + 1;
       this.logger.error(`Failed to auto-publish reel ${reel.id} (Attempt ${currentRetries}/3): ${extractedError}`);
 
+      let ownerEmail = 'N/A';
+      if (page?.fb_account?.owner_user_id) {
+        const u = await this.prisma.ztteam_users.findUnique({ where: { id: page.fb_account.owner_user_id }, select: { email: true } });
+        if (u) ownerEmail = u.email;
+      }
+
       if (isIdentityCheckpoint) {
-        /**
-         * ZTTeam: Kích hoạt Circuit Breaker ngay lập tức!
-         * Meta yêu cầu xác nhận danh tính trên điện thoại.
-         * Dừng thử lại ngay (set 3) và tạm dừng auto_publish trên Page để bảo vệ BM và các Page khác.
-         */
-        currentRetries = 3;
         await this.prisma.ztteam_pages.update({
           where: { id: page.id },
-          data: {
-            auto_publish_enabled: false,
-            token_status: 'checkpoint_required'
-          }
+          data: { auto_publish_enabled: false, token_status: 'checkpoint_required' }
         }).catch(() => {});
+        await this.prisma.ztteam_reels.update({
+          where: { id: reel.id },
+          data: {
+            status: 'FAILED',
+            post_retry_count: 3,
+            error_log: `[CIRCUIT BREAKER] Facebook yêu cầu xác minh danh tính (Code 368 / Subcode 4854002): ${extractedError}`,
+          }
+        });
         this.logger.warn(`[CIRCUIT BREAKER] Page ${page.name} kích hoạt bảo vệ do Facebook yêu cầu xác nhận danh tính. Tạm ngưng auto-publish.`);
+        const checkpointAlert =
+          `🚨 <b>[CẢNH BÁO: FANPAGE CẦN XÁC MINH DANH TÍNH]</b>\n\n` +
+          `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
+          `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
+          `📄 <b>Bài viết:</b> ${reel.wp_post_title || 'Video Reel'}\n` +
+          `❌ <b>Lỗi Facebook:</b> Yêu cầu Quản trị viên mở điện thoại xác minh danh tính (Code 368 / Subcode 4854002)\n` +
+          `🛡️ <b>Hành động hệ thống:</b> ĐÃ TỰ ĐỘNG TẠM DỪNG ĐĂNG BÀI trên Page này để bảo vệ BM và các Page khác.\n\n` +
+          `👉 <b>HƯỚNG DẪN MỞ KHÓA NGAY:</b>\n` +
+          `1. Mở ứng dụng Facebook trên điện thoại của Admin\n` +
+          `2. Chuyển sang Trang <b>${page.name}</b>\n` +
+          `3. Đăng thử 1 bài viết bất kỳ và làm theo thông báo xác nhận danh tính của Facebook trên điện thoại\n` +
+          `4. Sau khi đăng được, vào Cài đặt Page trên web và bật lại nút tự động đăng.`;
+        this.telegramService.ztteam_sendMessage(checkpointAlert).catch(() => {});
+        return;
+      }
+
+      if (isAppDeletedOrTokenExpired) {
+        await this.prisma.ztteam_pages.update({
+          where: { id: page.id },
+          data: { auto_publish_enabled: false, token_status: 'expired' }
+        }).catch(() => {});
+        await this.prisma.ztteam_reels.update({
+          where: { id: reel.id },
+          data: {
+            status: 'FAILED',
+            post_retry_count: 3,
+            error_log: `[TOKEN EXPIRED / APP DELETED] ${extractedError}`,
+          }
+        });
+        this.logger.warn(`[CIRCUIT BREAKER] Page ${page.name} token hết hạn hoặc Facebook App bị xóa. Tạm ngưng auto-publish.`);
+        const expiredAlert =
+          `🚨 <b>[CẢNH BÁO: FANPAGE HẾT HẠN TOKEN / APP BỊ XÓA]</b>\n\n` +
+          `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
+          `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
+          `❌ <b>Lỗi Facebook:</b> Token hết hạn hoặc App kết nối đã bị xóa (Code 190)\n` +
+          `🛡️ <b>Hành động hệ thống:</b> Đã tự động tạm dừng đăng bài trên Page này. Vui lòng kết nối lại token mới.`;
+        this.telegramService.ztteam_sendMessage(expiredAlert).catch(() => {});
+        return;
+      }
+
+      if (isPermissionDenied) {
+        await this.prisma.ztteam_pages.update({
+          where: { id: page.id },
+          data: { auto_publish_enabled: false, token_status: 'invalid' }
+        }).catch(() => {});
+        await this.prisma.ztteam_reels.update({
+          where: { id: reel.id },
+          data: {
+            status: 'FAILED',
+            post_retry_count: 3,
+            error_log: `[PERMISSION DENIED] ${extractedError}`,
+          }
+        });
+        this.logger.warn(`[CIRCUIT BREAKER] Page ${page.name} thiếu quyền đăng bài Facebook (#200). Tạm ngưng auto-publish.`);
+        const permissionAlert =
+          `🚨 <b>[CẢNH BÁO: FANPAGE THIẾU QUYỀN ĐĂNG BÀI]</b>\n\n` +
+          `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
+          `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
+          `❌ <b>Lỗi Facebook:</b> Token tài khoản không có quyền đăng Reel/Video lên Page này (Code 200)\n` +
+          `🛡️ <b>Hành động hệ thống:</b> Đã tự động tạm dừng đăng bài. Vui lòng kiểm tra quyền quản trị của BM trên Fanpage.`;
+        this.telegramService.ztteam_sendMessage(permissionAlert).catch(() => {});
+        return;
+      }
+
+      if (isRateLimited) {
+        await this.prisma.ztteam_pages.update({
+          where: { id: page.id },
+          data: { token_status: 'rate_limited', last_checked: new Date() }
+        }).catch(() => {});
+        await this.prisma.ztteam_reels.update({
+          where: { id: reel.id },
+          data: {
+            post_retry_count: 1,
+            error_log: `[FACEBOOK RATE LIMIT - SUBCODE 1390008] Tạm dừng 60 phút để bảo vệ Fanpage: ${extractedError}`,
+          }
+        });
+        this.logger.warn(`[CIRCUIT BREAKER] Page ${page.name} bị Facebook Rate Limit (1390008). Cooldown 60 phút.`);
+        const rateLimitAlert =
+          `⚠️ <b>[CẢNH BÁO: FANPAGE BỊ FACEBOOK GIỚI HẠN TẦN SUẤT ĐĂNG BÀI]</b>\n\n` +
+          `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
+          `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
+          `❌ <b>Lỗi Facebook:</b> Giới hạn tần suất đăng bài chống spam (Code 368 / Subcode 1390008)\n` +
+          `🛡️ <b>Hành động hệ thống:</b> ĐÃ TỰ ĐỘNG COOLDOWN 60 PHÚT trên Page này để tránh bị khóa tính năng, sau 60 phút hệ thống sẽ tự động thử lại an toàn.`;
+        this.telegramService.ztteam_sendMessage(rateLimitAlert).catch(() => {});
+        return;
       }
 
       if (currentRetries < 3) {
@@ -512,44 +680,20 @@ export class ZTTeamPublisherCron {
           data: {
             status: 'FAILED',
             post_retry_count: currentRetries,
-            error_log: isIdentityCheckpoint
-              ? `[CIRCUIT BREAKER] Facebook yêu cầu Quản trị viên mở điện thoại xác minh danh tính (Subcode 4854002): ${extractedError}`
-              : `Lỗi đăng bài sau 3 lần thử: ${extractedError}`,
+            error_log: `Lỗi đăng bài sau 3 lần thử: ${extractedError}`,
           }
         });
 
-        let ownerEmail = 'N/A';
-        if (page?.fb_account?.owner_user_id) {
-          const u = await this.prisma.ztteam_users.findUnique({ where: { id: page.fb_account.owner_user_id }, select: { email: true } });
-          if (u) ownerEmail = u.email;
-        }
-
-        if (isIdentityCheckpoint) {
-          const checkpointAlert =
-            `🚨 <b>[CẢNH BÁO: FANPAGE CẦN XÁC MINH DANH TÍNH]</b>\n\n` +
-            `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
-            `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
-            `📄 <b>Bài viết:</b> ${reel.wp_post_title || 'Video Reel'}\n` +
-            `❌ <b>Lỗi Facebook:</b> Yêu cầu Quản trị viên mở điện thoại xác minh danh tính (Code 368 / Subcode 4854002)\n` +
-            `🛡️ <b>Hành động hệ thống:</b> ĐÃ TỰ ĐỘNG TẠM DỪNG ĐĂNG BÀI trên Page này để bảo vệ BM và các Page khác.\n\n` +
-            `👉 <b>HƯỚNG DẪN MỞ KHÓA NGAY:</b>\n` +
-            `1. Mở ứng dụng Facebook trên điện thoại của Admin\n` +
-            `2. Chuyển sang Trang <b>${page.name}</b>\n` +
-            `3. Đăng thử 1 bài viết bất kỳ và làm theo thông báo xác nhận danh tính của Facebook trên điện thoại\n` +
-            `4. Sau khi đăng được, vào Cài đặt Page trên web và bật lại nút tự động đăng.`;
-          this.telegramService.ztteam_sendMessage(checkpointAlert).catch(() => {});
-        } else {
-          const alertMsg = this.telegramService.ztteam_formatAlert({
-            systemName: 'Xuất Bản Fanpage (Đăng Video Reel)',
-            fanpageName: page.name || 'Không rõ',
-            postTitle: reel.wp_post_title || 'Video Reel',
-            step: 'Đăng tải video Reel lên Facebook qua Graph API',
-            rawError: extractedError,
-            nextAction: 'Đã thử lại 3 lần thất bại. Vui lòng kiểm tra lại token Fanpage hoặc quyền đăng bài.',
-            memberEmail: ownerEmail,
-          });
-          this.telegramService.ztteam_sendMessage(alertMsg).catch(() => {});
-        }
+        const alertMsg = this.telegramService.ztteam_formatAlert({
+          systemName: 'Xuất Bản Fanpage (Đăng Video Reel)',
+          fanpageName: page.name || 'Không rõ',
+          postTitle: reel.wp_post_title || 'Video Reel',
+          step: 'Đăng tải video Reel lên Facebook qua Graph API',
+          rawError: extractedError,
+          nextAction: 'Đã thử lại 3 lần thất bại. Vui lòng kiểm tra lại token Fanpage hoặc quyền đăng bài.',
+          memberEmail: ownerEmail,
+        });
+        this.telegramService.ztteam_sendMessage(alertMsg).catch(() => {});
       }
     }
   }
@@ -707,24 +851,129 @@ export class ZTTeamPublisherCron {
         extractedError.includes('xác nhận danh tính') ||
         extractedError.includes('confirm your identity');
 
+      const isAppDeletedOrTokenExpired =
+        extractedError.includes('Code 190') ||
+        extractedError.includes('Application has been deleted') ||
+        extractedError.includes('Session has expired') ||
+        extractedError.includes('Error validating access token');
+
+      const isPermissionDenied =
+        extractedError.includes('(#200)') ||
+        extractedError.includes('Subject does not have permission');
+
+      const isRateLimited =
+        extractedError.includes('1390008') ||
+        extractedError.includes('We limit how often you can post') ||
+        extractedError.includes('Code 368');
+
       let currentRetries = (image.post_retry_count || 0) + 1;
       this.logger.error(`Failed to auto-publish image ${image.id} (Attempt ${currentRetries}/3): ${extractedError}`);
 
+      let ownerEmail = 'N/A';
+      if (page?.fb_account?.owner_user_id) {
+        const u = await this.prisma.ztteam_users.findUnique({ where: { id: page.fb_account.owner_user_id }, select: { email: true } });
+        if (u) ownerEmail = u.email;
+      }
+
       if (isIdentityCheckpoint) {
-        /**
-         * ZTTeam: Kích hoạt Circuit Breaker ngay lập tức!
-         * Meta yêu cầu xác nhận danh tính trên điện thoại.
-         * Dừng thử lại ngay (set 3) và tạm dừng auto_publish trên Page để bảo vệ BM và các Page khác.
-         */
-        currentRetries = 3;
         await this.prisma.ztteam_pages.update({
           where: { id: page.id },
-          data: {
-            auto_publish_enabled: false,
-            token_status: 'checkpoint_required'
-          }
+          data: { auto_publish_enabled: false, token_status: 'checkpoint_required' }
         }).catch(() => {});
+        await this.prisma.ztteam_images.update({
+          where: { id: image.id },
+          data: {
+            status: 'FAILED',
+            post_retry_count: 3,
+            error_log: `[CIRCUIT BREAKER] Facebook yêu cầu Quản trị viên mở điện thoại xác minh danh tính (Subcode 4854002): ${extractedError}`,
+          }
+        });
         this.logger.warn(`[CIRCUIT BREAKER] Page ${page.name} kích hoạt bảo vệ do Facebook yêu cầu xác nhận danh tính. Tạm ngưng auto-publish.`);
+        const checkpointAlert =
+          `🚨 <b>[CẢNH BÁO: FANPAGE CẦN XÁC MINH DANH TÍNH]</b>\n\n` +
+          `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
+          `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
+          `📄 <b>Bài viết:</b> ${image.wp_post_title || 'Bài viết ảnh'}\n` +
+          `❌ <b>Lỗi Facebook:</b> Yêu cầu Quản trị viên mở điện thoại xác minh danh tính (Code 368 / Subcode 4854002)\n` +
+          `🛡️ <b>Hành động hệ thống:</b> ĐÃ TỰ ĐỘNG TẠM DỪNG ĐĂNG BÀI trên Page này để bảo vệ BM và các Page khác.\n\n` +
+          `👉 <b>HƯỚNG DẪN MỞ KHÓA NGAY:</b>\n` +
+          `1. Mở ứng dụng Facebook trên điện thoại của Admin\n` +
+          `2. Chuyển sang Trang <b>${page.name}</b>\n` +
+          `3. Đăng thử 1 bài viết bất kỳ và làm theo thông báo xác nhận danh tính của Facebook trên điện thoại\n` +
+          `4. Sau khi đăng được, vào Cài đặt Page trên web và bật lại nút tự động đăng.`;
+        this.telegramService.ztteam_sendMessage(checkpointAlert).catch(() => {});
+        return;
+      }
+
+      if (isAppDeletedOrTokenExpired) {
+        await this.prisma.ztteam_pages.update({
+          where: { id: page.id },
+          data: { auto_publish_enabled: false, token_status: 'expired' }
+        }).catch(() => {});
+        await this.prisma.ztteam_images.update({
+          where: { id: image.id },
+          data: {
+            status: 'FAILED',
+            post_retry_count: 3,
+            error_log: `[TOKEN EXPIRED / APP DELETED] ${extractedError}`,
+          }
+        });
+        this.logger.warn(`[CIRCUIT BREAKER] Page ${page.name} token hết hạn hoặc Facebook App bị xóa. Tạm ngưng auto-publish.`);
+        const expiredAlert =
+          `🚨 <b>[CẢNH BÁO: FANPAGE HẾT HẠN TOKEN / APP BỊ XÓA]</b>\n\n` +
+          `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
+          `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
+          `❌ <b>Lỗi Facebook:</b> Token hết hạn hoặc App kết nối đã bị xóa (Code 190)\n` +
+          `🛡️ <b>Hành động hệ thống:</b> Đã tự động tạm dừng đăng bài trên Page này. Vui lòng kết nối lại token mới.`;
+        this.telegramService.ztteam_sendMessage(expiredAlert).catch(() => {});
+        return;
+      }
+
+      if (isPermissionDenied) {
+        await this.prisma.ztteam_pages.update({
+          where: { id: page.id },
+          data: { auto_publish_enabled: false, token_status: 'invalid' }
+        }).catch(() => {});
+        await this.prisma.ztteam_images.update({
+          where: { id: image.id },
+          data: {
+            status: 'FAILED',
+            post_retry_count: 3,
+            error_log: `[PERMISSION DENIED] ${extractedError}`,
+          }
+        });
+        this.logger.warn(`[CIRCUIT BREAKER] Page ${page.name} thiếu quyền đăng bài Facebook (#200). Tạm ngưng auto-publish.`);
+        const permissionAlert =
+          `🚨 <b>[CẢNH BÁO: FANPAGE THIẾU QUYỀN ĐĂNG BÀI]</b>\n\n` +
+          `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
+          `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
+          `❌ <b>Lỗi Facebook:</b> Token tài khoản không có quyền đăng bài lên Page này (Code 200)\n` +
+          `🛡️ <b>Hành động hệ thống:</b> Đã tự động tạm dừng đăng bài. Vui lòng kiểm tra quyền quản trị của BM trên Fanpage.`;
+        this.telegramService.ztteam_sendMessage(permissionAlert).catch(() => {});
+        return;
+      }
+
+      if (isRateLimited) {
+        await this.prisma.ztteam_pages.update({
+          where: { id: page.id },
+          data: { token_status: 'rate_limited', last_checked: new Date() }
+        }).catch(() => {});
+        await this.prisma.ztteam_images.update({
+          where: { id: image.id },
+          data: {
+            post_retry_count: 1,
+            error_log: `[FACEBOOK RATE LIMIT - SUBCODE 1390008] Tạm dừng 60 phút để bảo vệ Fanpage: ${extractedError}`,
+          }
+        });
+        this.logger.warn(`[CIRCUIT BREAKER] Page ${page.name} bị Facebook Rate Limit (1390008). Cooldown 60 phút.`);
+        const rateLimitAlert =
+          `⚠️ <b>[CẢNH BÁO: FANPAGE BỊ FACEBOOK GIỚI HẠN TẦN SUẤT ĐĂNG BÀI]</b>\n\n` +
+          `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
+          `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
+          `❌ <b>Lỗi Facebook:</b> Giới hạn tần suất đăng bài chống spam (Code 368 / Subcode 1390008)\n` +
+          `🛡️ <b>Hành động hệ thống:</b> ĐÃ TỰ ĐỘNG COOLDOWN 60 PHÚT trên Page này để tránh bị khóa tính năng, sau 60 phút hệ thống sẽ tự động thử lại an toàn.`;
+        this.telegramService.ztteam_sendMessage(rateLimitAlert).catch(() => {});
+        return;
       }
 
       if (currentRetries < 3) {
@@ -742,44 +991,20 @@ export class ZTTeamPublisherCron {
           data: {
             status: 'FAILED',
             post_retry_count: currentRetries,
-            error_log: isIdentityCheckpoint
-              ? `[CIRCUIT BREAKER] Facebook yêu cầu Quản trị viên mở điện thoại xác minh danh tính (Subcode 4854002): ${extractedError}`
-              : `Lỗi đăng ảnh sau 3 lần thử: ${extractedError}`
+            error_log: `Lỗi đăng ảnh sau 3 lần thử: ${extractedError}`
           }
         });
 
-        let ownerEmail = 'N/A';
-        if (page?.fb_account?.owner_user_id) {
-          const u = await this.prisma.ztteam_users.findUnique({ where: { id: page.fb_account.owner_user_id }, select: { email: true } });
-          if (u) ownerEmail = u.email;
-        }
-
-        if (isIdentityCheckpoint) {
-          const checkpointAlert =
-            `🚨 <b>[CẢNH BÁO: FANPAGE CẦN XÁC MINH DANH TÍNH]</b>\n\n` +
-            `🚩 <b>Fanpage:</b> <b>${page.name}</b> (ID: <code>${page.fb_page_id || page.id}</code>)\n` +
-            `👤 <b>Nick/BM:</b> ${page.fb_account?.name || page.fb_account?.business_name || 'Admin'}\n` +
-            `📄 <b>Bài viết:</b> ${image.wp_post_title || 'Bài viết ảnh'}\n` +
-            `❌ <b>Lỗi Facebook:</b> Yêu cầu Quản trị viên mở điện thoại xác minh danh tính (Code 368 / Subcode 4854002)\n` +
-            `🛡️ <b>Hành động hệ thống:</b> ĐÃ TỰ ĐỘNG TẠM DỪNG ĐĂNG BÀI trên Page này để bảo vệ BM và các Page khác.\n\n` +
-            `👉 <b>HƯỚNG DẪN MỞ KHÓA NGAY:</b>\n` +
-            `1. Mở ứng dụng Facebook trên điện thoại của Admin\n` +
-            `2. Chuyển sang Trang <b>${page.name}</b>\n` +
-            `3. Đăng thử 1 bài viết bất kỳ và làm theo thông báo xác nhận danh tính của Facebook trên điện thoại\n` +
-            `4. Sau khi đăng được, vào Cài đặt Page trên web và bật lại nút tự động đăng.`;
-          this.telegramService.ztteam_sendMessage(checkpointAlert).catch(() => {});
-        } else {
-          const alertMsg = this.telegramService.ztteam_formatAlert({
-            systemName: 'Xuất Bản Fanpage (Đăng Ảnh 2K)',
-            fanpageName: page.name || 'Không rõ',
-            postTitle: image.wp_post_title || 'Bài viết ảnh',
-            step: 'Đăng tải ảnh 2K và nội dung Caption lên Fanpage Facebook',
-            rawError: extractedError,
-            nextAction: 'Đã thử lại 3 lần thất bại. Vui lòng kiểm tra lại token Fanpage hoặc kết nối mạng.',
-            memberEmail: ownerEmail,
-          });
-          this.telegramService.ztteam_sendMessage(alertMsg).catch(() => {});
-        }
+        const alertMsg = this.telegramService.ztteam_formatAlert({
+          systemName: 'Xuất Bản Fanpage (Đăng Ảnh 2K)',
+          fanpageName: page.name || 'Không rõ',
+          postTitle: image.wp_post_title || 'Bài viết ảnh',
+          step: 'Đăng tải ảnh 2K và nội dung Caption lên Fanpage Facebook',
+          rawError: extractedError,
+          nextAction: 'Đã thử lại 3 lần thất bại. Vui lòng kiểm tra lại token Fanpage hoặc kết nối mạng.',
+          memberEmail: ownerEmail,
+        });
+        this.telegramService.ztteam_sendMessage(alertMsg).catch(() => {});
       }
     }
   }

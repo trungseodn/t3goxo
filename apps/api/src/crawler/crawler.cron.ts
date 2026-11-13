@@ -231,6 +231,10 @@ export class ZTTeamCrawlerCron implements OnApplicationBootstrap {
         }
       }
     } catch (htmlErr: any) {
+      if (htmlErr.message?.includes('404') || htmlErr.response?.status === 404) {
+        this.logger.log(`[Crawler] Trang trả về 404 Not Found (${pageUrl}). Đã hết danh sách phân trang.`);
+        return [];
+      }
       this.logger.warn(`Direct HTML scrape failed for ${pageUrl}: ${htmlErr.message}. Attempting Smart Proxy extraction...`);
       try {
         const proxyLinks = await this.fetcherService.ztteam_extractArticleLinksViaProxy(pageUrl);

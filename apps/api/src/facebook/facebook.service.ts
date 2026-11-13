@@ -1631,7 +1631,7 @@ export class ZTTeamFacebookService {
         this.httpService.post(
           `https://graph.facebook.com/${this.API_VERSION}/${pageId}/videos`,
           form,
-          { headers: form.getHeaders(), maxBodyLength: Infinity }
+          { headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 60000 }
         )
       );
 
@@ -1669,7 +1669,7 @@ export class ZTTeamFacebookService {
         this.httpService.post(
           `https://graph.facebook.com/${this.API_VERSION}/${pageId}/photos`,
           form,
-          { headers: form.getHeaders(), maxBodyLength: Infinity }
+          { headers: form.getHeaders(), maxBodyLength: Infinity, timeout: 45000 }
         )
       );
 
@@ -1693,7 +1693,8 @@ export class ZTTeamFacebookService {
       const response = await firstValueFrom(
         this.httpService.post(
           `https://graph.facebook.com/${this.API_VERSION}/${postId}/comments`,
-          { message, access_token: page.page_token_encrypted }
+          { message, access_token: page.page_token_encrypted },
+          { timeout: 20000 }
         )
       );
       return response.data;
