@@ -186,6 +186,15 @@ export class ZTTeamImageController {
         where.status = 'FAILED';
         where.is_posted = false;
         where.video_status = { notIn: ['PENDING', 'PROCESSING', 'COMPLETED'] };
+      } else if (s === 'ALL_FAILED' || s === 'FAILED_ALL') {
+        where.is_posted = false;
+        where.OR = [
+          { video_status: 'FAILED' },
+          {
+            status: 'FAILED',
+            video_status: { notIn: ['PENDING', 'PROCESSING', 'COMPLETED'] },
+          },
+        ];
       }
     }
 

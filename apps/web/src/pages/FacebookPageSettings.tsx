@@ -20,9 +20,29 @@ export default function FacebookPageSettings() {
     return hashMatch ? parseInt(hashMatch[1], 10) : 1;
   });
 
+  const [queueSubFilter, setQueueSubFilter] = useState<'all' | 'ready' | 'failed' | 'rendering'>(() => {
+    return window.location.hash.includes('filter=failed') ? 'failed' : 'all';
+  });
+
   useEffect(() => {
-    window.history.replaceState(null, '', `#tab=${activeTab}`);
-  }, [activeTab]);
+    const filterParam = queueSubFilter !== 'all' ? `&filter=${queueSubFilter}` : '';
+    window.history.replaceState(null, '', `#tab=${activeTab}${filterParam}`);
+  }, [activeTab, queueSubFilter]);
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash;
+      const tabMatch = hash.match(/tab=(\d+)/);
+      if (tabMatch) {
+        setActiveTab(parseInt(tabMatch[1], 10));
+      }
+      if (hash.includes('filter=failed')) {
+        setQueueSubFilter('failed');
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -98,6 +118,32 @@ export default function FacebookPageSettings() {
   const queueItems = useMemo(() => {
     return imagesQueue.filter(item => !item.is_posted && item.status !== 'POSTED');
   }, [imagesQueue]);
+
+  /** ZTTeam: Phân loại trạng thái hàng đợi: Bài lỗi, Sẵn sàng, Đang vẽ/render */
+  const failedQueueItems = useMemo(() => {
+    return queueItems.filter(item => item.video_status === 'FAILED' || item.status === 'FAILED');
+  }, [queueItems]);
+
+  const readyQueueItems = useMemo(() => {
+    return queueItems.filter(item => 
+      (item.status === 'COMPLETED' || Boolean(item.image_url)) &&
+      item.video_status !== 'FAILED' &&
+      item.status !== 'FAILED'
+    );
+  }, [queueItems]);
+
+  const renderingQueueItems = useMemo(() => {
+    return queueItems.filter(item => 
+      item.status === 'RENDERING' || item.status === 'PROCESSING' || item.status === 'QUEUED' || item.video_status === 'PENDING'
+    );
+  }, [queueItems]);
+
+  const displayedQueueItems = useMemo(() => {
+    if (queueSubFilter === 'failed') return failedQueueItems;
+    if (queueSubFilter === 'ready') return readyQueueItems;
+    if (queueSubFilter === 'rendering') return renderingQueueItems;
+    return queueItems;
+  }, [queueItems, queueSubFilter, failedQueueItems, readyQueueItems, renderingQueueItems]);
 
   const historyItems = useMemo(() => {
     return imagesQueue.filter(item => item.is_posted || item.status === 'POSTED');
@@ -326,16 +372,57 @@ export default function FacebookPageSettings() {
     }
   };
 
+  const [isRetryingFailedBatch, setIsRetryingFailedBatch] = useState(false);
+
   /** Fetch Queue Data */
   const ztteam_loadQueue = async (isSilent = false) => {
     try {
       if (!isSilent) setIsLoadingQueue(true);
       const imgRes = await api.get(`image/list?fbPageId=${id}&limit=50&_t=${Date.now()}`);
-      setImagesQueue(imgRes.data?.data || []);
+      let list = imgRes.data?.data || [];
+      // Tự động kiểm tra và merge thêm bài lỗi nếu có (đảm bảo bài lỗi không bao giờ bị trôi mất)
+      try {
+        const failedRes = await api.get(`image/list?fbPageId=${id}&status=ALL_FAILED&limit=50&_t=${Date.now()}`);
+        const failedList = failedRes.data?.data || [];
+        if (failedList.length > 0) {
+          const existingIds = new Set(list.map((it: any) => it.id));
+          const missingFailed = failedList.filter((it: any) => !existingIds.has(it.id));
+          if (missingFailed.length > 0) {
+            list = [...missingFailed, ...list];
+          }
+        }
+      } catch (fErr) {}
+      setImagesQueue(list);
     } catch (error: any) {
       if (!isSilent) ztteam_showToast('Lỗi tải danh sách bài viết', 'error');
     } finally {
       if (!isSilent) setIsLoadingQueue(false);
+    }
+  };
+
+  /** Tạo lại tất cả bài viết / video bị lỗi trong hàng đợi */
+  const ztteam_retryAllFailedQueue = async () => {
+    if (failedQueueItems.length === 0) return;
+    try {
+      setIsRetryingFailedBatch(true);
+      let successCount = 0;
+      for (const item of failedQueueItems) {
+        try {
+          if (item.video_status === 'FAILED') {
+            await api.post(`image/${item.id}/queue-video`);
+            successCount++;
+          } else if (item.status === 'FAILED') {
+            await api.post(`image/${item.id}/retry`);
+            successCount++;
+          }
+        } catch (e) {}
+      }
+      ztteam_showToast(`Đã đưa ${successCount} bài lỗi vào hàng chờ tạo lại!`, 'success');
+      await ztteam_loadQueue(true);
+    } catch (err: any) {
+      ztteam_showToast('Lỗi khi tạo lại bài viết', 'error');
+    } finally {
+      setIsRetryingFailedBatch(false);
     }
   };
 
@@ -742,6 +829,12 @@ export default function FacebookPageSettings() {
           }`}>
             {queueItems.length}
           </span>
+          {failedQueueItems.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse flex items-center gap-0.5 shadow-sm">
+              <span className="material-symbols-outlined text-[12px]">report_problem</span>
+              {failedQueueItems.length} lỗi
+            </span>
+          )}
         </button>
 
         <button
@@ -1455,9 +1548,16 @@ export default function FacebookPageSettings() {
               <div className="flex items-center gap-3">
                 <span className="material-symbols-outlined text-amber-400 text-[26px]">pending_actions</span>
                 <div>
-                  <h3 className="text-base font-black text-fb-text">Hàng Đợi Xuất Bản Bài Viết Ảnh 2K</h3>
+                  <h3 className="text-base font-black text-fb-text flex items-center gap-2">
+                    <span>Hàng Đợi Xuất Bản Bài Viết</span>
+                    {failedQueueItems.length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                        {failedQueueItems.length} bài lỗi
+                      </span>
+                    )}
+                  </h3>
                   <p className="text-[11px] text-fb-text-muted mt-0.5">
-                    Các bài viết đã tạo ảnh AI 2K thành công và đang chờ đến khung giờ xuất bản tự động ({queueItems.length} bài)
+                    Quản lý danh sách bài viết đang chờ xuất bản tự động theo lịch ({queueItems.length} bài tổng cộng)
                   </p>
                 </div>
               </div>
@@ -1474,6 +1574,121 @@ export default function FacebookPageSettings() {
               </div>
             </div>
 
+            {/** Cảnh báo bài lỗi & Nút xử lý nhanh */}
+            {failedQueueItems.length > 0 && (
+              <div className="mx-6 mt-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex flex-col md:flex-row md:items-center justify-between gap-3 text-rose-200 shadow-md">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-rose-400 text-2xl">report_problem</span>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-bold text-sm text-white flex items-center gap-2">
+                      <span>Phát hiện {failedQueueItems.length} bài đăng bị lỗi chưa xử lý</span>
+                    </div>
+                    <p className="text-xs text-rose-300/80 mt-0.5 line-clamp-1">
+                      {failedQueueItems[0]?.error_log ? `Lỗi gần nhất: ${failedQueueItems[0].error_log}` : 'Có bài viết bị lỗi tạo video hoặc lỗi xuất bản. Vui lòng bấm tạo lại để xử lý.'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setQueueSubFilter('failed')}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      queueSubFilter === 'failed'
+                        ? 'bg-rose-500 text-white shadow-md'
+                        : 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/30'
+                    }`}
+                  >
+                    Xem bài lỗi ({failedQueueItems.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={ztteam_retryAllFailedQueue}
+                    disabled={isRetryingFailedBatch}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-rose-900/20 cursor-pointer"
+                  >
+                    <span className={`material-symbols-outlined text-[16px] ${isRetryingFailedBatch ? 'animate-spin' : ''}`}>replay</span>
+                    <span>Tạo lại tất cả ({failedQueueItems.length})</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/** Sub-filter Tabs Bar */}
+            <div className="px-6 pt-5 pb-2 flex flex-wrap items-center gap-2 border-b border-fb-surface-hover/40">
+              <button
+                type="button"
+                onClick={() => setQueueSubFilter('all')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  queueSubFilter === 'all'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                    : 'bg-fb-surface-hover/60 text-fb-text-muted hover:text-fb-text hover:bg-fb-surface-hover'
+                }`}
+              >
+                <span>Tất cả</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${queueSubFilter === 'all' ? 'bg-white/20 text-white' : 'bg-black/20 text-fb-text-muted'}`}>
+                  {queueItems.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setQueueSubFilter('ready')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  queueSubFilter === 'ready'
+                    ? 'bg-cyan-600 text-white shadow-md shadow-cyan-500/20'
+                    : 'bg-fb-surface-hover/60 text-fb-text-muted hover:text-cyan-300 hover:bg-fb-surface-hover'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                <span>Sẵn sàng đăng</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${queueSubFilter === 'ready' ? 'bg-white/20 text-white' : 'bg-black/20 text-cyan-300'}`}>
+                  {readyQueueItems.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setQueueSubFilter('rendering')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  queueSubFilter === 'rendering'
+                    ? 'bg-amber-600 text-white shadow-md shadow-amber-500/20'
+                    : 'bg-fb-surface-hover/60 text-fb-text-muted hover:text-amber-300 hover:bg-fb-surface-hover'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[14px]">sync</span>
+                <span>Đang xử lý</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${queueSubFilter === 'rendering' ? 'bg-white/20 text-white' : 'bg-black/20 text-amber-300'}`}>
+                  {renderingQueueItems.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setQueueSubFilter('failed')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  queueSubFilter === 'failed'
+                    ? 'bg-rose-600 text-white shadow-md shadow-rose-500/20'
+                    : failedQueueItems.length > 0
+                    ? 'bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 border border-rose-500/30'
+                    : 'bg-fb-surface-hover/60 text-fb-text-muted hover:text-rose-300 hover:bg-fb-surface-hover'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[14px]">report_problem</span>
+                <span>Bài lỗi</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  queueSubFilter === 'failed'
+                    ? 'bg-white/20 text-white'
+                    : failedQueueItems.length > 0
+                    ? 'bg-rose-500/30 text-rose-300'
+                    : 'bg-black/20 text-fb-text-muted'
+                }`}>
+                  {failedQueueItems.length}
+                </span>
+              </button>
+            </div>
+
             {/** Queue List */}
             <div className="p-6">
               {isLoadingQueue ? (
@@ -1481,17 +1696,38 @@ export default function FacebookPageSettings() {
                   <span className="material-symbols-outlined animate-spin text-4xl text-fb-blue mb-3">refresh</span>
                   <span className="text-sm font-bold">Đang tải danh sách bài viết trong hàng đợi...</span>
                 </div>
-              ) : queueItems.length === 0 ? (
+              ) : displayedQueueItems.length === 0 ? (
                 <div className="py-16 text-center text-fb-text-muted flex flex-col items-center justify-center bg-fb-surface-hover/20 rounded-2xl border border-dashed border-fb-surface-hover/50">
-                  <span className="material-symbols-outlined text-5xl mb-3 text-fb-text-muted/40">schedule</span>
-                  <p className="text-base font-bold text-fb-text">Hàng đợi xuất bản hiện đang trống</p>
-                  <p className="text-xs text-fb-text-muted mt-1 max-w-md">
-                    Khi hệ thống tự động cào bài từ nguồn Website WordPress, các bài viết kèm ảnh AI 2K sẽ xuất hiện ở đây và tự động đăng lên Fanpage theo lịch đã thiết lập.
+                  <span className="material-symbols-outlined text-5xl mb-3 text-fb-text-muted/40">
+                    {queueSubFilter === 'failed' ? 'task_alt' : 'schedule'}
+                  </span>
+                  <p className="text-base font-bold text-fb-text">
+                    {queueSubFilter === 'failed'
+                      ? 'Không có bài đăng nào bị lỗi!'
+                      : queueSubFilter === 'ready'
+                      ? 'Chưa có bài viết nào ở trạng thái sẵn sàng đăng'
+                      : queueSubFilter === 'rendering'
+                      ? 'Không có bài viết nào đang trong tiến trình tạo ảnh hoặc render'
+                      : 'Hàng đợi xuất bản hiện đang trống'}
                   </p>
+                  <p className="text-xs text-fb-text-muted mt-1 max-w-md">
+                    {queueSubFilter === 'failed'
+                      ? 'Tất cả bài viết trong hàng đợi đều hợp lệ và sẵn sàng xuất bản tự động theo lịch.'
+                      : 'Khi hệ thống tự động cào bài từ nguồn Website WordPress, các bài viết kèm ảnh AI 2K sẽ xuất hiện ở đây và tự động đăng lên Fanpage theo lịch đã thiết lập.'}
+                  </p>
+                  {queueSubFilter !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => setQueueSubFilter('all')}
+                      className="mt-4 px-4 py-2 bg-fb-surface-hover hover:bg-fb-surface-hover/80 text-fb-text rounded-xl text-xs font-bold transition-all"
+                    >
+                      Xem tất cả bài viết ({queueItems.length})
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                  {queueItems.map((item) => (
+                  {displayedQueueItems.map((item) => (
                     <ZTTeamAIPostCard
                       key={item.id}
                       item={item}

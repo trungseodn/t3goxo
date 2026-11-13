@@ -49,6 +49,9 @@ export default function ZTTeamAIPostCard({
   const isCompleted = item.status === 'COMPLETED';
   const isPosted = item.is_posted || item.status === 'POSTED';
   const isFailed = item.status === 'FAILED';
+  const isVideoFailed = !isPosted && item.video_status === 'FAILED';
+  const isPostFailed = !isPosted && item.status === 'FAILED';
+  const hasAnyError = isVideoFailed || isPostFailed;
   const hasImage = Boolean(item.image_url);
   /** ZTTeam: Cho phép Đăng Ngay thủ công bất cứ lúc nào đã có ảnh và chưa đăng Facebook thành công (kể cả khi vừa bị lỗi đăng) */
   const canPostNow = hasImage && !isPosted && !isRendering;
@@ -115,6 +118,22 @@ export default function ZTTeamAIPostCard({
         </span>
       );
     }
+    if (isVideoFailed) {
+      return (
+        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1 shadow-sm" title={item.error_log || 'Lỗi render Video Reel'}>
+          <span className="material-symbols-outlined text-[13px] text-rose-400">videocam_off</span>
+          Lỗi tạo Video Reel
+        </span>
+      );
+    }
+    if (isPostFailed) {
+      return (
+        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1 shadow-sm" title={item.error_log || 'Lỗi đăng Fanpage'}>
+          <span className="material-symbols-outlined text-[13px] text-rose-400">sync_problem</span>
+          Lỗi đăng Fanpage
+        </span>
+      );
+    }
     switch (item.status) {
       case 'QUEUED':
         return (
@@ -158,7 +177,11 @@ export default function ZTTeamAIPostCard({
   const displayTime = item.updated_at || item.created_at;
 
   return (
-    <div className="bg-fb-surface rounded-2xl border border-fb-surface-hover/60 shadow-lg hover:border-fb-blue/40 transition-all flex flex-col overflow-hidden group">
+    <div className={`bg-fb-surface rounded-2xl border ${
+      hasAnyError
+        ? 'border-rose-500/60 shadow-lg shadow-rose-950/20'
+        : 'border-fb-surface-hover/60 shadow-lg hover:border-fb-blue/40'
+    } transition-all flex flex-col overflow-hidden group`}>
       {/** 1. Top Source Badge Bar */}
       <div className="px-4 py-2 bg-fb-surface-hover/30 border-b border-fb-surface-hover/50 flex items-center justify-between text-[11px] text-fb-text-muted">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -265,6 +288,51 @@ export default function ZTTeamAIPostCard({
           </div>
         )}
       </div>
+
+      {/** 2.2. Error Alert Banner khi tạo video hoặc đăng bài thất bại */}
+      {hasAnyError && (
+        <div className="mx-4 mt-2.5 p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-center justify-between gap-2 shadow-sm">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="material-symbols-outlined text-base text-rose-400 shrink-0">report_problem</span>
+            <div className="min-w-0">
+              <span className="font-bold block text-[11px] text-rose-200">
+                {isVideoFailed ? 'Lỗi tạo Video Reel' : 'Lỗi đăng bài Fanpage'}
+              </span>
+              <span className="truncate block text-[10px] text-rose-300/80" title={item.error_log || 'Thất bại'}>
+                {item.error_log ? `Chi tiết: ${item.error_log}` : 'Vui lòng bấm thử lại để xử lý bài đăng này.'}
+              </span>
+            </div>
+          </div>
+          {isVideoFailed && onQueueVideo && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onQueueVideo(item);
+              }}
+              className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[10px] font-bold shrink-0 flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+              title="Đưa bài viết về hàng chờ render lại Video Reel"
+            >
+              <span className="material-symbols-outlined text-xs">replay</span>
+              <span>Tạo lại Video</span>
+            </button>
+          )}
+          {isPostFailed && onPostNow && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPostNow(item);
+              }}
+              className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[10px] font-bold shrink-0 flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+              title="Thử đăng lại bài viết lên Facebook"
+            >
+              <span className="material-symbols-outlined text-xs">send</span>
+              <span>Đăng lại</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/** 3. Post Title - UPPERCASE Hook */}
       <div className="px-4 py-2">

@@ -224,10 +224,18 @@ function FanpageCard({ page, isExpired, testingPageId, handleTestPost, handleTog
                 </div>
               )}
               {((page.failedPostsCount || 0) > 0) && (
-                <div className="relative group/failedBadge shrink-0 cursor-help">
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-500/20 text-red-400 border border-red-500/40 shadow-sm">
-                    <span className="material-symbols-outlined text-[13px] text-red-400">report_problem</span>
-                    <span>Lỗi {page.failedPostsCount} bài</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/facebook/pages/${page.id}/settings#tab=2&filter=failed`);
+                  }}
+                  className="relative group/failedBadge shrink-0 cursor-pointer text-left"
+                  title="Bấm để xem và xử lý các bài đăng lỗi của Trang này"
+                >
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-500/20 text-red-400 border border-red-500/40 shadow-sm hover:bg-red-500 hover:text-white transition-all">
+                    <span className="material-symbols-outlined text-[13px]">report_problem</span>
+                    <span>Lỗi {page.failedPostsCount} bài (Xem ngay)</span>
                   </span>
 
                   {/** Tooltip giải thích chi tiết khi hover */}
@@ -237,10 +245,10 @@ function FanpageCard({ page, isExpired, testingPageId, handleTestPost, handleTog
                       <span>Có {page.failedPostsCount} bài đăng lỗi chưa xử lý</span>
                     </div>
                     <p className="text-[11px] text-slate-300 leading-relaxed">
-                      Trang này có bài viết hoặc video reel bị lỗi chưa được xử lý. Các bài đã đăng thành công hoặc đã đưa vào hàng chờ render lại sẽ không hiển thị tại đây.
+                      Bấm vào đây để mở trực tiếp Hàng Đợi của Trang và xử lý tạo lại bài viết / video bị lỗi.
                     </p>
                   </div>
-                </div>
+                </button>
               )}
             </div>
             <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-2 mt-1 text-[11px] font-medium text-fb-text-muted">

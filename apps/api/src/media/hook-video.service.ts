@@ -688,12 +688,23 @@ export class ZTTeamHookVideoService {
 
         browser = await puppeteer.launch({
           headless: true,
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-software-rasterizer',
+          ],
         });
         const page = await browser.newPage();
         await page.setViewport({ width: 1080, height: 1920, deviceScaleFactor: 1 });
-        await page.setContent(htmlContent, { waitUntil: 'load' });
-        await page.evaluateHandle('document.fonts.ready');
+        try {
+          await page.setContent(htmlContent, { waitUntil: 'load', timeout: 30000 });
+          await page.evaluateHandle('document.fonts.ready').catch(() => {});
+        } catch (navErr: any) {
+          this.logger.warn(`Puppeteer load warn: ${navErr?.message}`);
+        }
 
         const framePngPath = path.join(tempDir, 'text_story_frame.png');
         await page.screenshot({ path: framePngPath, omitBackground: false, type: 'png' });
@@ -980,12 +991,23 @@ export class ZTTeamHookVideoService {
 
       browser = await puppeteer.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-software-rasterizer',
+        ],
       });
       const page = await browser.newPage();
       await page.setViewport({ width: 1080, height: 1920, deviceScaleFactor: 1 });
-      await page.setContent(htmlContent, { waitUntil: 'load' });
-      await page.evaluateHandle('document.fonts.ready');
+      try {
+        await page.setContent(htmlContent, { waitUntil: 'load', timeout: 30000 });
+        await page.evaluateHandle('document.fonts.ready').catch(() => {});
+      } catch (navErr: any) {
+        this.logger.warn(`Puppeteer load warn: ${navErr?.message}`);
+      }
 
       const overlayPngPath = path.join(tempDir, 'frame_overlay.png');
       await page.screenshot({ path: overlayPngPath, omitBackground: true, type: 'png' });
